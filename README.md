@@ -25,26 +25,26 @@ Modern AI research spans fragmented infrastructure: local development workstatio
 
 ```mermaid
 flowchart TD
-    subgraph HostLaptop [Host Workstation]
-        Claude[Claude Code / OpenCode CLI]
-        Shield[Local Compute Shield\n*Blocks heavy runs on localhost*]
-        Digest[Executive Digest\n*Injects active 3D context & baselines*]
+    subgraph HostLaptop ["Host Workstation"]
+        Claude["Claude Code / OpenCode CLI"]
+        Shield["Local Compute Shield<br/>(Guards localhost from heavy runs)"]
+        Digest["Executive Digest<br/>(Injects active 3D context & baselines)"]
         Claude --> Shield
         Claude --> Digest
     end
 
-    subgraph AnchorDaemon [Persistent Daemon (tmux: anchor-lab-worker)]
-        Poller[Background Poller (watcher.js)]
-        ColabPoll[Colab CLI: 'colab status/log/download']
-        KagglePoll[Kaggle CLI: 'kaggle kernels status/output']
-        SSHPoll[SSH Rig: '192.168.1.80 journalctl']
+    subgraph AnchorDaemon ["Persistent Daemon (tmux: anchor-lab-worker)"]
+        Poller["Background Poller (watcher.js)"]
+        ColabPoll["Colab CLI: colab status/log/download"]
+        KagglePoll["Kaggle CLI: kaggle kernels status/output"]
+        SSHPoll["SSH Rig: 192.168.1.80 journalctl"]
         
         Poller --> ColabPoll
         Poller --> KagglePoll
         Poller --> SSHPoll
     end
 
-    subgraph ComputeTargets [Execution Targets]
+    subgraph ComputeTargets ["Execution Targets"]
         ColabCloud["Google Colab (Colab MCP + Colab CLI)"]
         KaggleCloud["Kaggle Kernels (Kaggle CLI)"]
         DesktopRig["Desktop Lab Rig: 192.168.1.80 (systemd-run)"]
@@ -58,8 +58,8 @@ flowchart TD
     KaggleCloud --> KagglePoll
     DesktopRig --> SSHPoll
 
-    Poller --> Storage["3D Partition Storage\n(models/<model>/<activity>/<experiment>/)\n• active/ (In-flight live stream)\n• completed/ (Verified finished)\n• ledger.json"]
-    Storage --> UniversalMCP[anchor-lab-ai MCP Server (14 Tools)]
+    Poller --> Storage["3D Partition Storage<br/>(models/model/activity/experiment/)<br/>• active/ (In-flight live stream)<br/>• completed/ (Verified finished)<br/>• ledger.json"]
+    Storage --> UniversalMCP["anchor-lab-ai MCP Server (14 Tools)"]
     UniversalMCP --> Claude
 ```
 
