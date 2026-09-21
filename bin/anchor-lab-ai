@@ -43,7 +43,15 @@ function ensureTmuxInstalled() {
     if (p) return true;
   } catch {}
   console.error(`[ERROR]: tmux is not installed on this machine.`);
-  console.error(`tmux is required to host the background worker daemon.\nPlease install it via:\n  sudo apt install -y tmux\n`);
+  let installCmd = 'sudo apt install -y tmux';
+  try {
+    if (execSync('which pacman 2>/dev/null', { encoding: 'utf8' }).trim()) {
+      installCmd = 'sudo pacman -S --noconfirm tmux';
+    } else if (execSync('which dnf 2>/dev/null', { encoding: 'utf8' }).trim()) {
+      installCmd = 'sudo dnf install -y tmux';
+    }
+  } catch {}
+  console.error(`tmux is required to host the background worker daemon and council windows.\nPlease install it via:\n  ${installCmd}\n`);
   return false;
 }
 
