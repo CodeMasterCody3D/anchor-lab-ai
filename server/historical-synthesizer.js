@@ -45,6 +45,12 @@ const ERROR_SIGNATURES = [
       }
 ];
 
+// The synthesizer's own reports quote every number it has ever ranked. Reading
+// one back in -- someone cats the dossier, greps the leaderboard, or an agent
+// echoes the archive -- would recycle those figures as fresh evidence and let a
+// value promote itself across runs. Any text carrying these markers is skipped.
+const SELF_ARTIFACT = /HISTORICAL_(?:DOSSIER|LEADERBOARD|ARCHIVE)|Measured \(tool output\)|Pre-Retention Archive|Historical Project Synthesis Dossier|prov=measured|\.anchor-lab-ai\b/i;
+
 // Scientific PPL parser (handles decimals and scientific notation)
 const PPL_REGEX_SRC = /\b(?:ppl|perplexity)[:=\s]+([0-9]+\.[0-9]+(?:e[+-]?[0-9]+)?)\b/gi;
 const LOSS_REGEX = /\b(?:loss|eval_loss)[:=\s]+([0-9]+\.[0-9]+)\b/i;
@@ -329,6 +335,10 @@ class HistoricalSynthesizer {
   extractMetrics(raw, provenance, sessionId, summary, extra = {}) {
     const sourceText = HistoricalSynthesizer.normalise(raw);
     if (!sourceText) return;
+    if (SELF_ARTIFACT.test(sourceText)) {
+      summary.self_referential_skips = (summary.self_referential_skips || 0) + 1;
+      return;
+    }
     const rx = new RegExp(PPL_REGEX_SRC.source, 'gi');
     let m;
     while ((m = rx.exec(sourceText)) !== null) {
@@ -407,13 +417,33 @@ class HistoricalSynthesizer {
     let rows = 0;
 
     try {
-      // Stored tool responses are genuine command output -> 'measured'.
+      // Only a shell tool's stdout/stderr is genuine command output. Read, Edit,
+      // Write and MCP responses carry file and document contents, and a PPL
+      // quoted inside a document is not a measurement -- ranking those would
+      // reintroduce exactly the laundering this provenance split exists to stop.
       try {
-        const sql = 'SELECT memory_session_id AS sid, project, created_at, tool_response'
-          + ' FROM tool_uses WHERE tool_response IS NOT NULL';
+        const sql = 'SELECT memory_session_id AS sid, project, created_at, tool_name, tool_input, tool_response'
+          + " FROM tool_uses WHERE tool_response IS NOT NULL AND tool_name IN ('Bash','BashOutput')";
         for (const r of db.prepare(sql).all()) {
           rows++;
-          const text = String(r.tool_response || '');
+          // A command that simply prints a past report produces stdout carrying
+          // no marker of its own, so the invocation is checked too.
+          if (SELF_ARTIFACT.test(String(r.tool_input || ''))) {
+            summary.self_referential_skips = (summary.self_referential_skips || 0) + 1;
+            continue;
+          }
+          let text = '';
+          try {
+            const parsed = JSON.parse(r.tool_response);
+            if (typeof parsed === 'string') {
+              text = parsed;
+            } else if (parsed && typeof parsed === 'object') {
+              if (parsed.stdout) text += ' ' + parsed.stdout;
+              if (parsed.stderr) text += ' ' + parsed.stderr;
+            }
+          } catch {
+            text = String(r.tool_response || '');
+          }
           if (!text.trim()) continue;
           const meta = { source: 'claude-mem:tool_uses', date: r.created_at, mem_project: r.project };
           this.detectArchitectures(text, summary);
