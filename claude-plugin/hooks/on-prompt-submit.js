@@ -18,11 +18,19 @@ process.stdin.on('end', () => {
     } catch {}
 
     const activeRuns = partitionMgr.listActiveRuns();
+    const ctxFile = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/active_context.json');
+    let ctx = { model: 'qwen2.5-0.5b', activity: 'training', experiment: 'recon-window' };
+    try {
+      if (fs.existsSync(ctxFile)) {
+        ctx = JSON.parse(fs.readFileSync(ctxFile, 'utf8'));
+      }
+    } catch {}
+
     let digest = `[ANCHOR-LAB-AI DIGEST]\n`;
-    digest += `Current Focus: [qwen2.5-0.5b] training/recon-window\n`;
+    digest += `Current Focus: [${ctx.model || 'general'}] ${ctx.activity || 'research'}/${ctx.experiment || 'active'}\n`;
     digest += `Active Harvester Model: ${modelRouter.getModel()}\n`;
     digest += `Compute Shield: ENABLED (No heavy training on localhost laptop. Route to Colab/Kaggle/192.168.1.80)\n`;
-    digest += `Verbose Logging Rule: All scripts MUST use sys.stdout.reconfigure(line_buffering=True) and print live per-step updates.\n`;
+    digest += `Verbose Logging Rule: All scripts MUST use unbuffered stdout (guarded hasattr(sys.stdout, 'reconfigure')) and print live per-step updates.\n`;
     digest += `Target Baselines: 8-bit PPL 9.94754 | 1-bit PPL 11.58607 | Q-TKintergers Base-3\n`;
 
     if (activeRuns.length > 0) {

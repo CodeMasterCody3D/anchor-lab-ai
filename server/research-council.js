@@ -53,28 +53,53 @@ Provide your expert evaluation:
 `.trim();
 
     for (const m of this.models) {
-      const res = this.router.query(councilPrompt, m);
+      const res = this.router.query(councilPrompt, m, { timeoutMs: 900000 });
       deliberation.perspectives.push({
         model: m,
         response: res.success ? res.response : `Error: ${res.error}`
       });
     }
 
-    // Synthesize consensus and proposal
+    // Synthesize dynamic smoke test parameters from deliberation
+    const successful = deliberation.perspectives.filter(p => !p.response.startsWith('Error:'));
+    const recommendations = [];
+    for (const p of successful) {
+      const recMatch = p.response.match(/(?:4\.\s*Consensus recommendation|Recommendation|Smoke[- ]?test parameters?)[^\n]*\n([\s\S]*?)(?=(?:\n###|\n\d+\.|$))/i);
+      if (recMatch) {
+        recommendations.push({ model: p.model, recommendation: recMatch[1].trim() });
+      }
+    }
+
+    const proposedSmokeTest = {
+      topic,
+      target_model: /taardis/i.test(topic) ? 'taardis-27b' : (/qwen3\.?5/i.test(topic) ? 'qwen3.5' : 'qwen2.5-0.5b'),
+      backend: 'Colab VM or Desktop Rig (192.168.1.80)',
+      steps: 50,
+      metric_gate: 'Must improve or match PPL baseline without NaN loss or gradient collapse',
+      recommendations: recommendations.length > 0 ? recommendations : deliberation.perspectives.map(p => ({ model: p.model, summary: p.response.slice(0, 300) }))
+    };
+    deliberation.proposed_smoke_test = proposedSmokeTest;
+
     const summary = deliberation.perspectives.map(p => `### [Model: ${p.model}]\n${p.response}`).join('\n\n');
     
-    // Save Smoke Test Proposal if consensus reached
+    // Save Smoke Test Proposal synthesized from deliberation
     const proposalFile = path.join(COUNCIL_DIR, 'SMOKE_TEST_PROPOSAL.md');
     let proposalMd = `# Research Council Smoke Test Proposal\n\n`;
     proposalMd += `**Topic**: ${topic}\n`;
     proposalMd += `**Date**: ${timestamp}\n`;
     proposalMd += `**Council Models**: ${this.models.join(', ')}\n\n`;
-    proposalMd += `## Council Deliberation Summary\n${summary}\n\n`;
-    proposalMd += `## Proposed Smoke Test for Claude\n`;
-    proposalMd += `- **Model**: Qwen2.5-0.5B\n`;
-    proposalMd += `- **Target Backend**: Colab VM or Desktop Rig (192.168.1.80)\n`;
-    proposalMd += `- **Steps**: 50 smoke steps\n`;
-    proposalMd += `- **Metric Gate**: Must improve or match PPL baseline without NaN loss.\n`;
+    proposalMd += `## Synthesized Smoke Test Parameters\n`;
+    proposalMd += `- **Target Architecture / Model**: ${proposedSmokeTest.target_model}\n`;
+    proposalMd += `- **Target Backend**: ${proposedSmokeTest.backend}\n`;
+    proposalMd += `- **Evaluation Steps**: ${proposedSmokeTest.steps} smoke steps\n`;
+    proposalMd += `- **Validation Gate**: ${proposedSmokeTest.metric_gate}\n\n`;
+    if (recommendations.length > 0) {
+      proposalMd += `### Model Recommendations\n`;
+      recommendations.forEach(r => {
+        proposalMd += `**${r.model}**:\n${r.recommendation}\n\n`;
+      });
+    }
+    proposalMd += `## Full Council Deliberation\n${summary}\n\n`;
     
     fs.writeFileSync(proposalFile, proposalMd, 'utf8');
     fs.writeFileSync(logFile, JSON.stringify(deliberation, null, 2), 'utf8');

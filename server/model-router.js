@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -39,37 +39,60 @@ class ModelRouter {
     return this.currentModel;
   }
 
-  query(prompt, overrideModel = null) {
+  query(prompt, overrideModel = null, options = {}) {
     const targetModel = overrideModel || this.currentModel;
+    const timeoutMs = options.timeoutMs || 900000; // 15 minutes default for deep research
 
     // Route 1: AGY Engine
     if (targetModel.startsWith('agy:') || targetModel.startsWith('agy/')) {
       const agyModel = targetModel.replace(/^agy[:\/]/, '');
       try {
-        const cmd = `agy -p "${prompt.replace(/"/g, '\\"')}" --model "${agyModel}" 2>/dev/null`;
-        const res = execSync(cmd, { encoding: 'utf8', timeout: 30000 });
-        return { success: true, model: targetModel, response: res.trim() };
+        const res = spawnSync('agy', ['-p', prompt, '--model', agyModel], {
+          encoding: 'utf8',
+          timeout: timeoutMs,
+          maxBuffer: 50 * 1024 * 1024
+        });
+        if (res.status === 0 && res.stdout) {
+          return { success: true, model: targetModel, response: res.stdout.trim() };
+        }
+        throw new Error(res.stderr || `agy process exited with code ${res.status}`);
       } catch (e) {
-        // Fallback to gemini-3.8-flash-high if specific agy model had capacity issue
+        // Fallback to gemini-3.8-flash-high if specific agy model had capacity or routing issue
         try {
-          const fallbackCmd = `agy -p "${prompt.replace(/"/g, '\\"')}" --model gemini-3.8-flash-high 2>/dev/null`;
-          const res = execSync(fallbackCmd, { encoding: 'utf8', timeout: 30000 });
-          return { success: true, model: 'agy:gemini-3.8-flash-high', response: res.trim(), note: `Fallback from ${targetModel}` };
+          const fallbackRes = spawnSync('agy', ['-p', prompt, '--model', 'gemini-3.8-flash-high'], {
+            encoding: 'utf8',
+            timeout: timeoutMs,
+            maxBuffer: 50 * 1024 * 1024
+          });
+          if (fallbackRes.status === 0 && fallbackRes.stdout) {
+            return { success: true, model: 'agy:gemini-3.8-flash-high', response: fallbackRes.stdout.trim(), note: `Fallback from ${targetModel}` };
+          }
+          return { success: false, error: fallbackRes.stderr || e.message };
         } catch (err2) {
-          return { success: false, error: e.message };
+          return { success: false, error: err2.message || e.message };
         }
       }
     }
 
     // Route 2: OpenCode (OpenAI, OpenRouter :free, or OpenCode models)
     try {
-      const cmd = `opencode run "${prompt.replace(/"/g, '\\"')}" -m "${targetModel}" 2>/dev/null`;
-      const res = execSync(cmd, { encoding: 'utf8', timeout: 45000 });
+      // Use direct argument spawning to eliminate shell-escaping bugs
+      const res = spawnSync('opencode', ['run', prompt, '-m', targetModel], {
+        encoding: 'utf8',
+        timeout: timeoutMs,
+        maxBuffer: 50 * 1024 * 1024
+      });
+
+      if (res.status !== 0) {
+        const errMsg = res.stderr || (res.error ? res.error.message : `Process exited with code ${res.status}`);
+        return { success: false, error: errMsg.trim(), model: targetModel };
+      }
+
       // strip out opencode header lines (e.g. "> build · gpt-5.6-luna")
-      const cleaned = res.replace(/^>.*$/gm, '').trim();
+      const cleaned = (res.stdout || '').replace(/^>.*$/gm, '').trim();
       return { success: true, model: targetModel, response: cleaned };
     } catch (e) {
-      return { success: false, error: e.message };
+      return { success: false, error: e.message, model: targetModel };
     }
   }
 }

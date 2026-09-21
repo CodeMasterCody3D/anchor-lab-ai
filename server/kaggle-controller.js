@@ -46,6 +46,16 @@ class KaggleController {
       return { success: false, error: e.message };
     }
   }
+
+  listRecentKernels(limit = 5) {
+    if (!this.isAvailable()) return { success: false, error: 'Kaggle CLI not installed' };
+    try {
+      const output = execSync(`${this.binPath} kernels list --mine --page-size ${limit} 2>/dev/null`, { encoding: 'utf8' });
+      return { success: true, raw: output.trim() };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  }
 }
 
 module.exports = KaggleController;

@@ -218,6 +218,10 @@ async function handleToolCall(name, args) {
         activity: args.activity,
         experiment: args.experiment
       };
+      try {
+        const ctxFile = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/active_context.json');
+        fs.writeFileSync(ctxFile, JSON.stringify(activeContext, null, 2), 'utf8');
+      } catch {}
       partitionMgr.getExperimentPath(args.model, args.activity, args.experiment);
       return { content: [{ type: 'text', text: `Context updated: Model='${args.model}' | Activity='${args.activity}' | Experiment='${args.experiment}'. Directories prepared.` }] };
     }
@@ -298,6 +302,15 @@ Recommendation: ${fitsHostLaptop ? 'Can run locally for micro-tests.' : 'Route t
         const sess = colabCtrl.getSessions();
         report += `• Colab CLI: ${sess.active ? 'Active session found' : 'No active sessions'}\n`;
       }
+      if (b === 'kaggle' || b === 'all') {
+        const kRes = kaggleCtrl.listRecentKernels(3);
+        if (kRes.success) {
+          const lines = kRes.raw.split('\n').filter(l => l.trim()).slice(0, 4);
+          report += `• Kaggle Kernels (Recent):\n${lines.map(l => '    ' + l).join('\n')}\n`;
+        } else {
+          report += `• Kaggle Kernels: ${kRes.error || 'Unavailable'}\n`;
+        }
+      }
       if (b === 'ssh' || b === 'all') {
         const r = sshCtrl.isReachable();
         report += `• Desktop Rig (192.168.1.80): ${r ? 'Online / Reachable' : 'Offline / Unreachable'}\n`;
@@ -322,8 +335,9 @@ Recommendation: ${fitsHostLaptop ? 'Can run locally for micro-tests.' : 'Route t
       const pyCode = `
 import sys, time, json
 
-# Force line buffering so stdout appears unbuffered
-sys.stdout.reconfigure(line_buffering=True)
+# Force line buffering so stdout appears unbuffered (guarded for ipykernel/Jupyter)
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
 
 class AnchorLiveLogger:
     def __init__(self, model: str, activity: str, experiment: str, run_id: str, total_steps: int):
