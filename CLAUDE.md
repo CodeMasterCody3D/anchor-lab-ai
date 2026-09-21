@@ -29,8 +29,10 @@
 6. **Never add an unnamed design element.**
    - *"If I didn't say it, don't add it — ask me first."*
    - List proposed design elements (loss function, trainables, schedule, corpus, activation scaling) and ask before assuming.
-7. **Never defer a mid-run order.**
-   - When Cody orders a halt or direction change mid-flight, act immediately.
+7. **Targeted mid-run order handling (No collateral process killing).**
+   - When Cody orders a change or edit mid-flight, ONLY terminate a running process if it is the EXACT run or script being modified.
+   - Never terminate unrelated background training runs, watchers, pollers, or test benchmarks.
+   - If uncertain whether an active run conflicts with the requested change, **ASK Cody first** before killing anything: *"Do you want me to halt run [run_id] before editing [script]?"*
 8. **No scientific notation.**
    - Format numbers as `0.00015` or `0.015%`, never `1.5e-4`. For very small figures, write "3 in 10 million".
 9. **Outputs over PPL.**

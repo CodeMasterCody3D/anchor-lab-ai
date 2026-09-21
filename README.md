@@ -65,6 +65,18 @@ flowchart TD
 
 ---
 
+## 📋 Recommended Setup: CLAUDE.md
+
+This repository includes [`CLAUDE.md`](CLAUDE.md) embodying our strict AI laboratory guidelines: local compute shields, unbuffered streaming telemetry, bit-exact zero-float audits, and targeted mid-run process management (no collateral kills of active training runs).
+
+> **Recommended**: Copy [`CLAUDE.md`](CLAUDE.md) into your AI research repository root (or append its rules to your existing `CLAUDE.md`):
+> ```bash
+> cp path/to/anchor-lab-ai/CLAUDE.md /path/to/your-project/CLAUDE.md
+> ```
+> Claude Code will automatically detect and adhere to these strict laboratory guardrails.
+
+---
+
 ## ⚡ Core Capabilities
 
 ### 1. Intelligent 6-Type Graph Engine
