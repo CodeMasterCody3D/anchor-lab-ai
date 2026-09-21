@@ -62,15 +62,41 @@ class HistoricalSynthesizer {
     };
   }
 
+  // Subagent and workflow transcripts live in nested directories, so a flat
+  // readdir sees only a fraction of a project's sessions.
+  walkJsonl(dir) {
+    const out = [];
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) out.push(...this.walkJsonl(full));
+      else if (e.isFile() && e.name.endsWith('.jsonl')) out.push(full);
+    }
+    return out;
+  }
+
   async scanProject(projectFolderName = '-home-cody-onebit-forge') {
-    const projectDir = path.join(this.baseProjectsDir, projectFolderName);
-    if (!fs.existsSync(projectDir)) {
-      const err = { error: `Project directory not found: ${projectDir}` };
+    const folders = Array.isArray(projectFolderName) ? projectFolderName : [projectFolderName];
+    const projectDirs = [];
+    for (const name of folders) {
+      if (name === '--all' || name === '*') {
+        for (const e of fs.readdirSync(this.baseProjectsDir, { withFileTypes: true })) {
+          if (e.isDirectory()) projectDirs.push(path.join(this.baseProjectsDir, e.name));
+        }
+      } else {
+        projectDirs.push(path.join(this.baseProjectsDir, name));
+      }
+    }
+    const existingDirs = projectDirs.filter(d => fs.existsSync(d));
+    if (existingDirs.length === 0) {
+      const err = { error: `Project directory not found: ${projectDirs.join(', ')}` };
       this.writeStatus({ status: 'error', error: err.error, message: err.error, updated_at: new Date().toISOString() });
       return err;
     }
 
-    const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+    const files = [];
+    for (const d of existingDirs) files.push(...this.walkJsonl(d));
     const startTime = new Date().toISOString();
 
     this.writeStatus({
@@ -83,11 +109,11 @@ class HistoricalSynthesizer {
       current_file: '',
       traps_found: 0,
       best_ppl: null,
-      message: `Starting scan of ${files.length} sessions in ${projectFolderName}...`
+      message: `Starting scan of ${files.length} sessions in ${folders.join(', ')}...`
     });
 
     const summary = {
-      project: projectFolderName,
+      project: folders.join(', '),
       total_sessions_scanned: files.length,
       runs_found: [],
       best_runs: [],
@@ -141,9 +167,9 @@ class HistoricalSynthesizer {
 
     try {
       for (let i = 0; i < files.length; i++) {
-        const f = files[i];
-        const filePath = path.join(projectDir, f);
-        const sessionId = f.replace('.jsonl', '');
+        const filePath = files[i];
+        const f = path.relative(this.baseProjectsDir, filePath);
+        const sessionId = path.basename(filePath, '.jsonl');
 
         this.writeStatus({
           status: 'running',
@@ -165,17 +191,20 @@ class HistoricalSynthesizer {
           for await (const line of rl) {
             if (!line.trim()) continue;
             let textToScan = line;
+            let outputText = '';
 
             try {
               const parsed = JSON.parse(line);
-              // Scan assistant messages, user tool results, and stdout
-              if (parsed.toolUseResult && parsed.toolUseResult.stdout) {
-                textToScan += ' ' + parsed.toolUseResult.stdout;
-              }
-              if (parsed.toolUseResult && parsed.toolUseResult.stderr) {
-                textToScan += ' ' + parsed.toolUseResult.stderr;
+              // Tool output is the only trustworthy source of a MEASURED metric.
+              // Assistant prose that merely mentions a number is not a benchmark.
+              const tur = parsed.toolUseResult;
+              if (tur) {
+                if (typeof tur === 'string') outputText += ' ' + tur;
+                if (tur.stdout) outputText += ' ' + tur.stdout;
+                if (tur.stderr) outputText += ' ' + tur.stderr;
               }
             } catch {}
+            textToScan += outputText;
 
             // Detect models / architectures
             if (/qwen[23]?\.[50]?[-_]0\.[58]b/i.test(textToScan)) summary.architectures.add('Qwen 0.5B / 0.8B');
@@ -184,19 +213,38 @@ class HistoricalSynthesizer {
             if (/gptq-rot|hadamard/i.test(textToScan)) summary.architectures.add('Hadamard Rotation (GPTQ-Rot block 128)');
             if (/q1_0_g32/i.test(textToScan)) summary.architectures.add('Q1_0_g32 Packing');
 
-            // Detect metrics & PPL
-            let pplMatch;
-            while ((pplMatch = pplRegex.exec(textToScan)) !== null) {
-              const valStr = pplMatch[1];
-              const val = parseFloat(valStr);
-              // Real language model PPLs fall between 1.5 and 300. Ignore scientific notation divergence like 1.3e15
-              if (!valStr.toLowerCase().includes('e') && val >= 1.5 && val <= 300.0) {
-                const lossMatch = textToScan.match(lossRegex);
+            // Detect metrics & PPL, tagged by provenance.
+            // 'measured' = emitted by a real command; 'mentioned' = discussed in prose.
+            for (const [provenance, sourceText] of [['measured', outputText], ['mentioned', line]]) {
+              if (!sourceText) continue;
+              pplRegex.lastIndex = 0;
+              let pplMatch;
+              while ((pplMatch = pplRegex.exec(sourceText)) !== null) {
+                const valStr = pplMatch[1];
+                const val = parseFloat(valStr);
+                // Real language model PPLs fall between 1.5 and 300. Ignore scientific notation divergence like 1.3e15
+                if (valStr.toLowerCase().includes('e')) continue;
+                if (!(val >= 1.5 && val <= 300.0)) continue;
+
+                const ctx = sourceText.slice(Math.max(0, pplMatch.index - 80), pplMatch.index + 160);
+                const after = sourceText.slice(pplMatch.index, pplMatch.index + 80);
+
+                // "PPL 3.4 billion" - the captured float is a magnitude, not a score
+                if (/\b(billion|million|trillion|thousand)\b/i.test(after.slice(0, 40))) continue;
+                // "PPL 3.53 -> 1335.98" - the captured value is the pre-blowup number
+                if (/^[^\n]{0,40}(->|\u2192)\s*[0-9]/.test(after)) continue;
+                // Teacher / baseline / reference floors are not quantized results
+                if (/\b(teacher|baseline|reference|fp16|fp32|bf16|floor|unquantized)\b/i.test(ctx)) continue;
+                // Prose comparisons: "math ppl 2.3 vs finance 22.5"
+                if (/\bvs\b/i.test(after.slice(0, 40))) continue;
+
+                const lossMatch = sourceText.match(lossRegex);
                 summary.runs_found.push({
                   session: sessionId,
+                  provenance,
                   ppl: val,
                   loss: lossMatch ? parseFloat(lossMatch[1]) : null,
-                  snippet: textToScan.slice(Math.max(0, pplMatch.index - 40), pplMatch.index + 120)
+                  snippet: ctx
                 });
               }
             }
@@ -218,9 +266,13 @@ class HistoricalSynthesizer {
         } catch (err) {}
       }
 
-      // Deduplicate runs by PPL value & sort ascending
+      // Rank ONLY measured metrics from real tool output. Prose mentions are
+      // kept for audit but never presented as benchmarks.
+      const measuredRuns = summary.runs_found.filter(r => r.provenance === 'measured');
+      summary.measured_count = measuredRuns.length;
+      summary.mentioned_count = summary.runs_found.length - measuredRuns.length;
       const uniqueRunsMap = new Map();
-      for (const r of summary.runs_found) {
+      for (const r of measuredRuns) {
         const key = r.ppl.toFixed(4);
         if (!uniqueRunsMap.has(key)) {
           uniqueRunsMap.set(key, r);
@@ -292,11 +344,12 @@ class HistoricalSynthesizer {
       md += `- **${a}**\n`;
     });
 
-    md += `\n## 2. Validated Empirical Results (Lowest Perplexity)\n\n`;
+    md += `\n## 2. Measured Empirical Results (Lowest Perplexity)\n\n`;
+    md += `*Only values emitted by real command output are ranked. ${summary.mentioned_count || 0} additional PPL figures appeared in prose and were excluded as non-benchmarks.*\n\n`;
     md += `| Rank | PPL | Loss | Session ID | Status |\n`;
     md += `| :--- | :--- | :--- | :--- | :--- |\n`;
     summary.best_runs.forEach((r, idx) => {
-      md += `| #${idx + 1} | **${r.ppl.toFixed(4)}** | ${r.loss !== null ? r.loss.toFixed(4) : 'N/A'} | \`${r.session.slice(0, 16)}...\` | Validated Benchmark |\n`;
+      md += `| #${idx + 1} | **${r.ppl.toFixed(4)}** | ${r.loss !== null ? r.loss.toFixed(4) : 'N/A'} | \`${r.session.slice(0, 16)}...\` | Measured (tool output) |\n`;
     });
 
     md += `\n## 3. Key Historical Traps & Defenses\n`;
@@ -311,12 +364,16 @@ class HistoricalSynthesizer {
 
 if (require.main === module) {
   const synth = new HistoricalSynthesizer();
-  console.log('[HISTORICAL SYNTHESIZER]: Scanning past sessions in ~/.claude/projects/ ...');
-  synth.scanProject().then(res => {
+  const targets = process.argv.slice(2).filter(a => a.trim());
+  const scanArg = targets.length ? targets : undefined;
+  console.log(`[HISTORICAL SYNTHESIZER]: Scanning past sessions in ~/.claude/projects/ (${scanArg ? scanArg.join(', ') : 'default project'}) ...`);
+  synth.scanProject(scanArg).then(res => {
+    if (res && res.error) { console.error(`\u2716 ${res.error}`); process.exitCode = 1; return; }
     console.log(`\n✔ Historical Synthesis Complete!`);
     console.log(`• Sessions Scanned: ${res.total_sessions_scanned}`);
     console.log(`• Architectures Found: ${Array.from(res.architectures).join(', ')}`);
-    console.log(`• Best Validated PPL: ${res.best_runs.length > 0 ? res.best_runs[0].ppl : 'N/A'}`);
+    console.log(`• Measured PPL values: ${res.measured_count} (prose mentions excluded: ${res.mentioned_count})`);
+    console.log(`• Best Measured PPL: ${res.best_runs.length > 0 ? res.best_runs[0].ppl : 'N/A'}`);
     console.log(`• Critical Failure Traps Documented: ${res.failures.size}`);
     console.log(`• Isolated files updated in ~/.anchor-lab-ai/projects/quantization-side-lab/historical/`);
   });

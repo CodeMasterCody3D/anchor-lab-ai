@@ -147,7 +147,8 @@ switch (command) {
   case 'scan': {
     const synthPath = path.join(__dirname, '../server/historical-synthesizer.js');
     console.log(`[ANCHOR-LAB-AI]: Running full project historical scan...`);
-    require('child_process').execSync(`node "${synthPath}"`, { stdio: 'inherit' });
+    const scanTargets = args.slice(1).map(a => `"${a}"`).join(' ');
+    require('child_process').execSync(`node "${synthPath}" ${scanTargets}`.trim(), { stdio: 'inherit' });
     break;
   }
 
