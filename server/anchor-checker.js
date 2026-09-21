@@ -5,6 +5,7 @@ const { execSync } = require('child_process');
 const HistoricalSynthesizer = require('./historical-synthesizer');
 const PartitionManager = require('./partition-manager');
 const ModelRouter = require('./model-router');
+const { loadActiveContext } = require('./audit-wizard');
 
 class AnchorChecker {
   constructor() {
@@ -42,11 +43,7 @@ class AnchorChecker {
       web_search_policy: 'PROHIBITED_ON_MAIN_ANCHOR (Main anchor stays anchored; heavy exploration delegated to subagents)',
       context_drift_guard: 'ACTIVE (Main anchor maintains ground-truth ledger and monitors subagents without context window inflation)',
       harvester_model: this.modelRouter.getModel(),
-      active_context: {
-        model: 'qwen2.5-0.5b',
-        activity: 'quantization',
-        experiment: '1-bit-trits'
-      }
+      active_context: loadActiveContext()
     };
 
     return {

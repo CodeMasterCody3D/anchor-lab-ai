@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
+const { getProjectBaseDir } = require('./project-resolver');
 
 const VALID_ACTIVITIES = ['training', 'quantization', 'experiment', 'evaluation'];
 
 class PartitionManager {
-  constructor(baseDir = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab')) {
-    this.baseDir = baseDir;
+  constructor(baseDir = null) {
+    this.baseDir = baseDir || getProjectBaseDir();
     this.modelsDir = path.join(this.baseDir, 'models');
     this.ensureDir(this.modelsDir);
   }
@@ -49,6 +50,8 @@ class PartitionManager {
       percent: 0,
       loss: null,
       ppl: null,
+      backend: run_spec.backend || 'colab',
+      slug: run_spec.slug || null,
       updated_at: new Date().toISOString()
     };
     fs.writeFileSync(progressFile, JSON.stringify(initialProgress, null, 2), 'utf8');
@@ -116,6 +119,60 @@ class PartitionManager {
     fs.writeFileSync(ledgerFile, JSON.stringify(ledger, null, 2), 'utf8');
 
     return metricsPayload;
+  }
+
+  /**
+   * Helper to sync or register a Kaggle kernel run into the partition manager.
+   */
+  syncKaggleRun({ model, activity, experiment, run_id, slug, status, latest_step, finished, rawLog }) {
+    const expPath = this.getExperimentPath(model, activity, experiment);
+    const activeDir = path.join(expPath, 'active', run_id);
+    const completedDir = path.join(expPath, 'completed', run_id);
+
+    // If already completed and finished, nothing to do
+    if (fs.existsSync(completedDir) && (finished || (status && status.complete))) {
+      return;
+    }
+
+    if (!fs.existsSync(activeDir) && !fs.existsSync(completedDir)) {
+      this.createRun({
+        model,
+        activity,
+        experiment,
+        run_id,
+        run_spec: {
+          backend: 'kaggle',
+          slug,
+          total_steps: latest_step ? latest_step.total_steps : 0
+        }
+      });
+    }
+
+    if (latest_step && fs.existsSync(activeDir)) {
+      this.updateLiveProgress({
+        model,
+        activity,
+        experiment,
+        run_id,
+        telemetry: {
+          ...latest_step,
+          backend: 'kaggle',
+          slug,
+          status: (status && status.statusText) || 'RUNNING'
+        }
+      });
+    }
+
+    if ((finished || (status && status.complete)) && fs.existsSync(activeDir)) {
+      this.completeRun({
+        model,
+        activity,
+        experiment,
+        run_id,
+        final_metrics: (finished && finished.metrics) || {},
+        full_stdout: rawLog || ''
+      });
+    }
   }
 
   listActiveRuns() {

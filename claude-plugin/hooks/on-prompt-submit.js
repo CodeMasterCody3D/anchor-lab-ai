@@ -30,6 +30,7 @@ process.stdin.on('end', () => {
     digest += `Current Focus: [${ctx.model || 'general'}] ${ctx.activity || 'research'}/${ctx.experiment || 'active'}\n`;
     digest += `Active Harvester Model: ${modelRouter.getModel()}\n`;
     digest += `Compute Shield: ENABLED (No heavy training on localhost laptop. Route to Colab/Kaggle/192.168.1.80)\n`;
+    digest += `GPU Policy: never open a NEW Colab VM without Cody; if a VM is already UP, USE IT (idle compute is waste -- he stops the run or says so). Kaggle CPU kernels: launch freely. GPU work: prefer the live VM; if none is up and Kaggle cannot carry it, drop to CPU rather than block.\n`;
     digest += `Verbose Logging Rule: All scripts MUST use unbuffered stdout (guarded hasattr(sys.stdout, 'reconfigure')) and print live per-step updates.\n`;
     digest += `Target Baselines: 8-bit PPL 9.94754 | 1-bit PPL 11.58607 | Q-TKintergers Base-3\n`;
 

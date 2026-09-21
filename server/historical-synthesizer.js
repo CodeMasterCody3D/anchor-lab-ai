@@ -1,7 +1,7 @@
-#!/usr/bin/env node
 const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
+const { getProjectBaseDir } = require('./project-resolver');
 
 const STATUS_FILE = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/historical_status.json');
 const MEMORY_DB = path.join(process.env.HOME || '/home/cody', '.claude-mem/claude-mem.db');
@@ -59,10 +59,10 @@ const LOSS_REGEX = /\b(?:loss|eval_loss)[:=\s]+([0-9]+\.[0-9]+)\b/i;
 class HistoricalSynthesizer {
   constructor(
     baseProjectsDir = path.join(process.env.HOME || '/home/cody', '.claude/projects'),
-    outputBase = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab/historical')
+    outputBase = null
   ) {
     this.baseProjectsDir = baseProjectsDir;
-    this.outputBase = outputBase;
+    this.outputBase = outputBase || path.join(getProjectBaseDir(), 'historical');
     if (!fs.existsSync(this.outputBase)) {
       fs.mkdirSync(this.outputBase, { recursive: true });
     }
@@ -85,8 +85,8 @@ class HistoricalSynthesizer {
       }
     } catch {}
 
-    // Fallback: check if historical artifacts already exist
-    const outputBase = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab/historical');
+    // Fallback: check if historical artifacts already exist in active project
+    const outputBase = path.join(getProjectBaseDir(), 'historical');
     const dossierPath = path.join(outputBase, 'HISTORICAL_DOSSIER.md');
     const leaderboardPath = path.join(outputBase, 'HISTORICAL_LEADERBOARD.json');
     const graveyardPath = path.join(outputBase, 'FAILURE_GRAVEYARD.md');
@@ -606,7 +606,7 @@ if (require.main === module) {
       console.log(`• claude-mem archive: unavailable${cov.error ? ` (${cov.error})` : ''}`);
     }
     console.log(`• Critical Failure Traps Documented: ${res.failures.size}`);
-    console.log(`• Isolated files updated in ~/.anchor-lab-ai/projects/quantization-side-lab/historical/`);
+    console.log(`• Isolated files updated in ${synth.outputBase}`);
   });
 }
 

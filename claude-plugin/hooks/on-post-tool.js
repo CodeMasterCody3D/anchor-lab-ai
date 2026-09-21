@@ -11,11 +11,35 @@ process.stdin.on('end', () => {
 
   try {
     const data = JSON.parse(input);
+    let summary = '';
+    let command = undefined;
+
+    if (data.tool_input) {
+      if (typeof data.tool_input === 'string') {
+        summary = data.tool_input;
+      } else {
+        command = data.tool_input.command || data.tool_input.cmd || undefined;
+        const desc = data.tool_input.description || '';
+        const filePath = data.tool_input.file_path || data.tool_input.path || data.tool_input.target || '';
+        if (command) {
+          summary = command + (desc ? ` (${desc})` : '');
+        } else if (filePath) {
+          summary = `file: ${filePath}` + (desc ? ` (${desc})` : '');
+        } else if (desc) {
+          summary = desc;
+        } else {
+          summary = JSON.stringify(data.tool_input);
+        }
+      }
+    }
+
     const event = {
       type: 'POST_TOOL_USE',
       timestamp: new Date().toISOString(),
-      tool: data.tool_name || data.tool,
-      summary: data.tool_input ? Object.keys(data.tool_input).join(', ') : ''
+      tool: data.tool_name || data.tool || 'unknown',
+      summary: summary.slice(0, 500),
+      command: command ? command.slice(0, 500) : undefined,
+      input: (data.tool_input && typeof data.tool_input === 'object') ? data.tool_input : undefined
     };
     fs.appendFileSync(EVENTS_FILE, JSON.stringify(event) + '\n', 'utf8');
   } catch (e) {}

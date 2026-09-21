@@ -62,7 +62,33 @@ switch (command) {
   }
 
   case 'status': {
+    const { loadActiveContext } = require('../server/audit-wizard');
+    const KaggleController = require('../server/kaggle-controller');
+    const kaggleCtrl = new KaggleController();
+    const ctx = loadActiveContext();
+
+    // Auto-discover active Kaggle runs
+    try {
+      const activeKaggle = kaggleCtrl.getActiveKernels(5);
+      for (const k of activeKaggle) {
+        const runId = k.slug.split('/').pop() || k.slug;
+        const kLogs = kaggleCtrl.getKernelLog(k.slug);
+        partitionMgr.syncKaggleRun({
+          model: (kLogs.latest_step && kLogs.latest_step.model) || ctx.model,
+          activity: (kLogs.latest_step && kLogs.latest_step.activity) || ctx.activity,
+          experiment: (kLogs.latest_step && kLogs.latest_step.experiment) || ctx.experiment,
+          run_id: runId,
+          slug: k.slug,
+          status: k.status,
+          latest_step: kLogs.latest_step,
+          finished: kLogs.finished,
+          rawLog: kLogs.raw
+        });
+      }
+    } catch (_) {}
+
     console.log(`[ANCHOR-LAB-AI STATUS]`);
+    console.log(`Active Context: [${ctx.model}] ${ctx.activity}/${ctx.experiment}`);
     console.log(`Active Harvester Model: ${modelRouter.getModel()}`);
     const activeRuns = partitionMgr.listActiveRuns();
     console.log(`In-Flight Active Runs: ${activeRuns.length}`);

@@ -5,6 +5,16 @@ const path = require('path');
 
 const CONFIG_PATH = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/config.json');
 
+// Cody's `agy-auto` is a bash ALIAS (.bashrc:139 -- `agy --mode=accept-edits --dangerously-skip-permissions`),
+// and spawnSync runs a binary directly with no shell, so the alias is invisible here. Pass the flag instead.
+// WHY IT IS NEEDED (measured 2026-09-21): a council round asking the models to verify arXiv papers came back
+// `Error: jetski: no output produced -- a tool required the "read_url" permission that headless mode cannot
+// prompt for, so it was auto-denied.` Without this, every agy council answer is INFERENCE, never sourced.
+// NOTE: the alias also carries `--mode=accept-edits`, deliberately NOT included -- the council is advisory-only
+// and must never edit files (Cody 2026-09-21: "you write the code not the council"). Read permission is what
+// research needs; edit permission is not. Add it here only if Cody asks.
+const AGY_FLAGS = ['--dangerously-skip-permissions'];
+
 class ModelRouter {
   constructor() {
     this.currentModel = this.loadConfiguredModel();
@@ -47,7 +57,7 @@ class ModelRouter {
     if (targetModel.startsWith('agy:') || targetModel.startsWith('agy/')) {
       const agyModel = targetModel.replace(/^agy[:\/]/, '');
       try {
-        const res = spawnSync('agy', ['-p', prompt, '--model', agyModel], {
+        const res = spawnSync('agy', [...AGY_FLAGS, '-p', prompt, '--model', agyModel], {
           encoding: 'utf8',
           timeout: timeoutMs,
           maxBuffer: 50 * 1024 * 1024
@@ -59,7 +69,7 @@ class ModelRouter {
       } catch (e) {
         // Fallback to gemini-3.8-flash-high if specific agy model had capacity or routing issue
         try {
-          const fallbackRes = spawnSync('agy', ['-p', prompt, '--model', 'gemini-3.8-flash-high'], {
+          const fallbackRes = spawnSync('agy', [...AGY_FLAGS, '-p', prompt, '--model', 'gemini-3.8-flash-high'], {
             encoding: 'utf8',
             timeout: timeoutMs,
             maxBuffer: 50 * 1024 * 1024

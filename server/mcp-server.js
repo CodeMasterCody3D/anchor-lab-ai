@@ -7,19 +7,20 @@ const ColabController = require('./colab-controller');
 const KaggleController = require('./kaggle-controller');
 const SSHController = require('./ssh-controller');
 const ModelRouter = require('./model-router');
-const { runAudit, renderBanner, loadActiveContext } = require('./audit-wizard');
+const { runAudit, renderBanner, loadActiveContext, ACTIVE_CONTEXT_FILE } = require('./audit-wizard');
 const { searchTranscripts } = require('./archeologist');
+const { getProjectBaseDir } = require('./project-resolver');
 
-const BASE_DIR = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab');
+const BASE_DIR = getProjectBaseDir();
 const partitionMgr = new PartitionManager(BASE_DIR);
 const colabCtrl = new ColabController();
 const kaggleCtrl = new KaggleController();
 const sshCtrl = new SSHController();
 const modelRouter = new ModelRouter();
 
-// Load from active_context.json, do NOT hardcode: a fresh MCP process used to report the stale defaults
-// until someone called lab_set_context in THAT process (2026-09-21 fix).
-let activeContext = loadActiveContext();
+function getActiveContext() {
+  return loadActiveContext();
+}
 
 const TOOLS = [
   {
@@ -188,15 +189,51 @@ const TOOLS = [
       type: 'object',
       properties: {}
     }
+  },
+  {
+    name: 'lab_kaggle_track',
+    description: 'Track, poll, or ingest a remote Kaggle kernel run by slug, pulling live __ANCHOR_STEP__ sentinels into the in-flight ledger.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        slug: { type: 'string', description: 'Kaggle kernel slug (e.g. codemastercody3d/e3-state-precision-cliff)' },
+        model: { type: 'string', description: 'Model ID (defaults to active context)' },
+        activity: { type: 'string', description: 'Activity (defaults to active context)' },
+        experiment: { type: 'string', description: 'Experiment (defaults to active context)' }
+      },
+      required: ['slug']
+    }
   }
 ];
 
 async function handleToolCall(name, args) {
   switch (name) {
     case 'lab_get_state': {
+      const currentCtx = getActiveContext();
+
+      // Ingest live progress from any running Kaggle kernels
+      try {
+        const activeKaggle = kaggleCtrl.getActiveKernels(5);
+        for (const k of activeKaggle) {
+          const runId = k.slug.split('/').pop() || k.slug;
+          const kLogs = kaggleCtrl.getKernelLog(k.slug);
+          partitionMgr.syncKaggleRun({
+            model: (kLogs.latest_step && kLogs.latest_step.model) || currentCtx.model,
+            activity: (kLogs.latest_step && kLogs.latest_step.activity) || currentCtx.activity,
+            experiment: (kLogs.latest_step && kLogs.latest_step.experiment) || currentCtx.experiment,
+            run_id: runId,
+            slug: k.slug,
+            status: k.status,
+            latest_step: kLogs.latest_step,
+            finished: kLogs.finished,
+            rawLog: kLogs.raw
+          });
+        }
+      } catch (_) {}
+
       const activeRuns = partitionMgr.listActiveRuns();
       let stateMsg = `[ANCHOR-LAB-AI EXECUTIVE DIGEST]\n`;
-      stateMsg += `Active Context: Model='${activeContext.model}' | Activity='${activeContext.activity}' | Experiment='${activeContext.experiment}'\n`;
+      stateMsg += `Active Context: Model='${currentCtx.model}' | Activity='${currentCtx.activity}' | Experiment='${currentCtx.experiment}'\n`;
       stateMsg += `Hardware Guard: Localhost Protected. Training routed to Colab/Kaggle/192.168.1.80.\n`;
       stateMsg += `Active In-Flight Runs: ${activeRuns.length}\n`;
       if (activeRuns.length > 0) {
@@ -211,14 +248,13 @@ async function handleToolCall(name, args) {
     }
 
     case 'lab_set_context': {
-      activeContext = {
+      const newCtx = {
         model: args.model,
         activity: args.activity,
         experiment: args.experiment
       };
       try {
-        const ctxFile = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/active_context.json');
-        fs.writeFileSync(ctxFile, JSON.stringify(activeContext, null, 2), 'utf8');
+        fs.writeFileSync(ACTIVE_CONTEXT_FILE, JSON.stringify(newCtx, null, 2), 'utf8');
       } catch {}
       partitionMgr.getExperimentPath(args.model, args.activity, args.experiment);
       return { content: [{ type: 'text', text: `Context updated: Model='${args.model}' | Activity='${args.activity}' | Experiment='${args.experiment}'. Directories prepared.` }] };
@@ -320,8 +356,56 @@ Recommendation: ${fitsHostLaptop ? 'Can run locally for micro-tests.' : 'Route t
       if (args.backend === 'colab') {
         const logs = colabCtrl.getLog();
         return { content: [{ type: 'text', text: `Colab logs retrieved (${logs.steps ? logs.steps.length : 0} step sentinels found):\n${logs.raw ? logs.raw.slice(-2000) : 'No output'}` }] };
+      } else if (args.backend === 'kaggle') {
+        const slug = args.slug;
+        if (!slug) {
+          return { content: [{ type: 'text', text: 'Error: slug parameter required for kaggle log fetch (e.g. codemastercody3d/qwen35-k5-gemv-v7-0917).' }] };
+        }
+        const logs = kaggleCtrl.getKernelLog(slug);
+        let msg = `[KAGGLE LOG INGEST: ${slug}]\n`;
+        msg += `• Status: ${(logs.status && logs.status.statusText) || 'Unknown'}\n`;
+        msg += `• Step Sentinels Extracted: ${logs.steps.length}\n`;
+        if (logs.latest_step) {
+          msg += `• Latest Step: ${logs.latest_step.step}/${logs.latest_step.total_steps} (loss=${logs.latest_step.loss})\n`;
+        }
+        if (logs.finished) {
+          msg += `• Finish Sentinel: ${JSON.stringify(logs.finished)}\n`;
+        }
+        msg += `\n--- Log Output Tail ---\n${logs.raw ? logs.raw.slice(-2000) : '(empty)'}\n`;
+        return { content: [{ type: 'text', text: msg }] };
       }
       return { content: [{ type: 'text', text: `Backend ${args.backend} log fetch complete.` }] };
+    }
+
+    case 'lab_kaggle_track': {
+      const currentCtx = getActiveContext();
+      const slug = args.slug;
+      const runId = slug.split('/').pop() || slug;
+      const m = args.model || currentCtx.model;
+      const a = args.activity || currentCtx.activity;
+      const e = args.experiment || currentCtx.experiment;
+
+      const logs = kaggleCtrl.getKernelLog(slug);
+      partitionMgr.syncKaggleRun({
+        model: m,
+        activity: a,
+        experiment: e,
+        run_id: runId,
+        slug: slug,
+        status: logs.status,
+        latest_step: logs.latest_step,
+        finished: logs.finished,
+        rawLog: logs.raw
+      });
+
+      let res = `[KAGGLE RUN TRACKED: ${slug}]\n`;
+      res += `• Partition: [${m}][${a}/${e}]\n`;
+      res += `• Status: ${(logs.status && logs.status.statusText) || 'UNKNOWN'}\n`;
+      res += `• Sentinels Ingested: ${logs.steps.length} steps\n`;
+      if (logs.latest_step) {
+        res += `• Live Progress: Step ${logs.latest_step.step}/${logs.latest_step.total_steps} (loss=${logs.latest_step.loss})\n`;
+      }
+      return { content: [{ type: 'text', text: res }] };
     }
 
     case 'lab_remote_colab_dispatch': {
@@ -385,9 +469,10 @@ Rules:
     }
 
     case 'lab_get_test_report': {
-      const m = args.model || activeContext.model;
-      const a = args.activity || activeContext.activity;
-      const e = args.experiment || activeContext.experiment;
+      const currentCtx = getActiveContext();
+      const m = args.model || currentCtx.model;
+      const a = args.activity || currentCtx.activity;
+      const e = args.experiment || currentCtx.experiment;
       const ledger = partitionMgr.getExperimentLedger(m, a, e);
 
       let table = `[BENCHMARK LEDGER: ${m} > ${a} > ${e}]\n`;
@@ -434,10 +519,11 @@ Does that sound familiar?
     }
 
     case 'lab_get_morning_handoff': {
+      const currentCtx = getActiveContext();
       const handoff = `
 [MORNING HANDOFF CARD]
 • Overnight Status: 0 failed runs, all remote units healthy.
-• Active Focus: [${activeContext.model}] ${activeContext.activity}/${activeContext.experiment}
+• Active Focus: [${currentCtx.model}] ${currentCtx.activity}/${currentCtx.experiment}
 • Last Baseline: 8-bit PPL 9.94754 / 1-bit PPL 11.58607
 • Next Action: Ready to evaluate next quantization checkpoint on Colab or SSH rig.
 `.trim();
