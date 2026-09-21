@@ -28,6 +28,7 @@ When the user runs `/anchorhelp`, output this formatted command directory and qu
                      • Radar Spider:      /anchorgraph radar
                      • Specific Item:     /anchorgraph <ID> (or say "recent")
   /anchorgraphlive   Toggle real-time live graph streaming for runs (ON/OFF)
+  /anchorlabcheck    Audit historical scan progress, subagents & supervisor invariants
   /researchpaper     Generate formal academic research paper from project dossier
   /anchorcouncil <t> Convene advisory subagents for research & smoke test proposals
                      (Strictly advisory — zero code editing / file modification)
@@ -36,6 +37,7 @@ When the user runs `/anchorhelp`, output this formatted command directory and qu
 [Terminal CLI Utilities (anchor-lab-ai <command>)]:
   anchor-lab-ai doctor         Audit Colab MCP, Colab CLI, Kaggle, SSH rig & auth
   anchor-lab-ai status         Show active 3D context, running runs, and model
+  anchor-lab-ai check          Audit historical scan status, subagents & supervisor invariants
   anchor-lab-ai model [choice] View or switch worker model (e.g. openai/gpt-5.6-luna)
   anchor-lab-ai scan           Run full-project historical scan into isolated archive
   anchor-lab-ai sweep <query>  Search past session transcripts for lost code/records

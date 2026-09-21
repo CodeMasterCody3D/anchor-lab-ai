@@ -182,6 +182,14 @@ const TOOLS = [
       type: 'object',
       properties: {}
     }
+  },
+  {
+    name: 'anchor_lab_check',
+    description: 'Audits historical synthesis progress, spawned subagent tasks, background daemons, and verifies Main Anchor supervisor invariants (no drift, no unstructured web searches).',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
   }
 ];
 
@@ -422,6 +430,13 @@ Does that sound familiar?
 • Next Action: Ready to evaluate next quantization checkpoint on Colab or SSH rig.
 `.trim();
       return { content: [{ type: 'text', text: handoff }] };
+    }
+
+    case 'anchor_lab_check': {
+      const AnchorChecker = require('./anchor-checker');
+      const checker = new AnchorChecker();
+      const report = checker.renderReport();
+      return { content: [{ type: 'text', text: report }] };
     }
 
     default:

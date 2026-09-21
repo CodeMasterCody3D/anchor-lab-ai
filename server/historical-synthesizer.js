@@ -3,6 +3,8 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
+const STATUS_FILE = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/historical_status.json');
+
 class HistoricalSynthesizer {
   constructor(
     baseProjectsDir = path.join(process.env.HOME || '/home/cody', '.claude/projects'),
@@ -15,13 +17,75 @@ class HistoricalSynthesizer {
     }
   }
 
+  writeStatus(statusObj) {
+    try {
+      const parentDir = path.dirname(STATUS_FILE);
+      if (!fs.existsSync(parentDir)) {
+        fs.mkdirSync(parentDir, { recursive: true });
+      }
+      fs.writeFileSync(STATUS_FILE, JSON.stringify(statusObj, null, 2), 'utf8');
+    } catch {}
+  }
+
+  static getStatus() {
+    try {
+      if (fs.existsSync(STATUS_FILE)) {
+        return JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'));
+      }
+    } catch {}
+
+    // Fallback: check if historical artifacts already exist
+    const outputBase = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab/historical');
+    const dossierPath = path.join(outputBase, 'HISTORICAL_DOSSIER.md');
+    const leaderboardPath = path.join(outputBase, 'HISTORICAL_LEADERBOARD.json');
+    const graveyardPath = path.join(outputBase, 'FAILURE_GRAVEYARD.md');
+
+    if (fs.existsSync(dossierPath) && fs.existsSync(leaderboardPath)) {
+      try {
+        const leaderboard = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
+        const stats = fs.statSync(dossierPath);
+        return {
+          status: 'completed',
+          completed_at: stats.mtime.toISOString(),
+          progress_pct: 100,
+          best_ppl: leaderboard.length > 0 ? leaderboard[0].ppl : null,
+          traps_found: fs.existsSync(graveyardPath) ? (fs.readFileSync(graveyardPath, 'utf8').match(/### Trap #/g) || []).length : 0,
+          message: 'Historical synthesis archive is complete and verified.'
+        };
+      } catch {}
+    }
+
+    return {
+      status: 'idle',
+      progress_pct: 0,
+      message: 'No historical scan is currently active. Use /anchorscan or anchor-lab-ai scan to begin.'
+    };
+  }
+
   async scanProject(projectFolderName = '-home-cody-onebit-forge') {
     const projectDir = path.join(this.baseProjectsDir, projectFolderName);
     if (!fs.existsSync(projectDir)) {
-      return { error: `Project directory not found: ${projectDir}` };
+      const err = { error: `Project directory not found: ${projectDir}` };
+      this.writeStatus({ status: 'error', error: err.error, message: err.error, updated_at: new Date().toISOString() });
+      return err;
     }
 
     const files = fs.readdirSync(projectDir).filter(f => f.endsWith('.jsonl'));
+    const startTime = new Date().toISOString();
+
+    this.writeStatus({
+      status: 'running',
+      started_at: startTime,
+      updated_at: startTime,
+      total_files: files.length,
+      files_scanned: 0,
+      progress_pct: 0,
+      current_file: '',
+      traps_found: 0,
+      best_ppl: null,
+      message: `Starting scan of ${files.length} sessions in ${projectFolderName}...`
+    });
+
     const summary = {
       project: projectFolderName,
       total_sessions_scanned: files.length,
@@ -75,84 +139,125 @@ class HistoricalSynthesizer {
       }
     ];
 
-    for (const f of files) {
-      const filePath = path.join(projectDir, f);
-      const sessionId = f.replace('.jsonl', '');
-      try {
-        const fileStream = fs.createReadStream(filePath);
-        const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const filePath = path.join(projectDir, f);
+        const sessionId = f.replace('.jsonl', '');
 
-        for await (const line of rl) {
-          if (!line.trim()) continue;
-          let textToScan = line;
+        this.writeStatus({
+          status: 'running',
+          started_at: startTime,
+          updated_at: new Date().toISOString(),
+          total_files: files.length,
+          files_scanned: i,
+          progress_pct: Math.round((i / files.length) * 100),
+          current_file: f,
+          traps_found: summary.failures.size,
+          best_ppl: summary.runs_found.length > 0 ? Math.min(...summary.runs_found.map(r => r.ppl)) : null,
+          message: `Analyzing session ${i + 1}/${files.length} (${sessionId.slice(0, 8)})...`
+        });
 
-          try {
-            const parsed = JSON.parse(line);
-            // Scan assistant messages, user tool results, and stdout
-            if (parsed.toolUseResult && parsed.toolUseResult.stdout) {
-              textToScan += ' ' + parsed.toolUseResult.stdout;
+        try {
+          const fileStream = fs.createReadStream(filePath);
+          const rl = readline.createInterface({ input: fileStream, crlfDelay: Infinity });
+
+          for await (const line of rl) {
+            if (!line.trim()) continue;
+            let textToScan = line;
+
+            try {
+              const parsed = JSON.parse(line);
+              // Scan assistant messages, user tool results, and stdout
+              if (parsed.toolUseResult && parsed.toolUseResult.stdout) {
+                textToScan += ' ' + parsed.toolUseResult.stdout;
+              }
+              if (parsed.toolUseResult && parsed.toolUseResult.stderr) {
+                textToScan += ' ' + parsed.toolUseResult.stderr;
+              }
+            } catch {}
+
+            // Detect models / architectures
+            if (/qwen[23]?\.[50]?[-_]0\.[58]b/i.test(textToScan)) summary.architectures.add('Qwen 0.5B / 0.8B');
+            if (/taardis/i.test(textToScan)) summary.architectures.add('Taardis 0.8B');
+            if (/q-tk-packing|q-tkintergers|tk_codec/i.test(textToScan)) summary.architectures.add('Q-TKInteger Base-3 Trits (Bit-Exact Containers)');
+            if (/gptq-rot|hadamard/i.test(textToScan)) summary.architectures.add('Hadamard Rotation (GPTQ-Rot block 128)');
+            if (/q1_0_g32/i.test(textToScan)) summary.architectures.add('Q1_0_g32 Packing');
+
+            // Detect metrics & PPL
+            let pplMatch;
+            while ((pplMatch = pplRegex.exec(textToScan)) !== null) {
+              const valStr = pplMatch[1];
+              const val = parseFloat(valStr);
+              // Real language model PPLs fall between 1.5 and 300. Ignore scientific notation divergence like 1.3e15
+              if (!valStr.toLowerCase().includes('e') && val >= 1.5 && val <= 300.0) {
+                const lossMatch = textToScan.match(lossRegex);
+                summary.runs_found.push({
+                  session: sessionId,
+                  ppl: val,
+                  loss: lossMatch ? parseFloat(lossMatch[1]) : null,
+                  snippet: textToScan.slice(Math.max(0, pplMatch.index - 40), pplMatch.index + 120)
+                });
+              }
             }
-            if (parsed.toolUseResult && parsed.toolUseResult.stderr) {
-              textToScan += ' ' + parsed.toolUseResult.stderr;
-            }
-          } catch {}
 
-          // Detect models / architectures
-          if (/qwen[23]?\.[50]?[-_]0\.[58]b/i.test(textToScan)) summary.architectures.add('Qwen 0.5B / 0.8B');
-          if (/taardis/i.test(textToScan)) summary.architectures.add('Taardis 0.8B');
-          if (/q-tk-packing|q-tkintergers|tk_codec/i.test(textToScan)) summary.architectures.add('Q-TKInteger Base-3 Trits (Bit-Exact Containers)');
-          if (/gptq-rot|hadamard/i.test(textToScan)) summary.architectures.add('Hadamard Rotation (GPTQ-Rot block 128)');
-          if (/q1_0_g32/i.test(textToScan)) summary.architectures.add('Q1_0_g32 Packing');
-
-          // Detect metrics & PPL
-          let pplMatch;
-          while ((pplMatch = pplRegex.exec(textToScan)) !== null) {
-            const valStr = pplMatch[1];
-            const val = parseFloat(valStr);
-            // Real language model PPLs fall between 1.5 and 300. Ignore scientific notation divergence like 1.3e15
-            if (!valStr.toLowerCase().includes('e') && val >= 1.5 && val <= 300.0) {
-              const lossMatch = textToScan.match(lossRegex);
-              summary.runs_found.push({
-                session: sessionId,
-                ppl: val,
-                loss: lossMatch ? parseFloat(lossMatch[1]) : null,
-                snippet: textToScan.slice(Math.max(0, pplMatch.index - 40), pplMatch.index + 120)
-              });
+            // Detect concrete failure signatures
+            for (const sig of errorSignatures) {
+              const match = textToScan.match(sig.regex);
+              if (match && !summary.failures.has(sig.name)) {
+                summary.failures.set(sig.name, {
+                  title: sig.name,
+                  session: sessionId,
+                  matchedText: match[0],
+                  mitigation: sig.mitigation,
+                  snippet: textToScan.slice(Math.max(0, match.index - 50), match.index + 250).replace(/\\n/g, '\n')
+                });
+              }
             }
           }
-
-          // Detect concrete failure signatures
-          for (const sig of errorSignatures) {
-            const match = textToScan.match(sig.regex);
-            if (match && !summary.failures.has(sig.name)) {
-              summary.failures.set(sig.name, {
-                title: sig.name,
-                session: sessionId,
-                matchedText: match[0],
-                mitigation: sig.mitigation,
-                snippet: textToScan.slice(Math.max(0, match.index - 50), match.index + 250).replace(/\\n/g, '\n')
-              });
-            }
-          }
-        }
-      } catch (err) {}
-    }
-
-    // Deduplicate runs by PPL value & sort ascending
-    const uniqueRunsMap = new Map();
-    for (const r of summary.runs_found) {
-      const key = r.ppl.toFixed(4);
-      if (!uniqueRunsMap.has(key)) {
-        uniqueRunsMap.set(key, r);
+        } catch (err) {}
       }
-    }
-    const deduplicatedRuns = Array.from(uniqueRunsMap.values());
-    deduplicatedRuns.sort((a, b) => a.ppl - b.ppl);
-    summary.best_runs = deduplicatedRuns.slice(0, 10);
 
-    // Write isolated historical dossier
-    this.saveHistoricalRecords(summary);
-    return summary;
+      // Deduplicate runs by PPL value & sort ascending
+      const uniqueRunsMap = new Map();
+      for (const r of summary.runs_found) {
+        const key = r.ppl.toFixed(4);
+        if (!uniqueRunsMap.has(key)) {
+          uniqueRunsMap.set(key, r);
+        }
+      }
+      const deduplicatedRuns = Array.from(uniqueRunsMap.values());
+      deduplicatedRuns.sort((a, b) => a.ppl - b.ppl);
+      summary.best_runs = deduplicatedRuns.slice(0, 10);
+
+      // Write isolated historical records
+      this.saveHistoricalRecords(summary);
+
+      // Record final completed status
+      this.writeStatus({
+        status: 'completed',
+        started_at: startTime,
+        completed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        total_files: files.length,
+        files_scanned: files.length,
+        progress_pct: 100,
+        best_ppl: summary.best_runs.length > 0 ? summary.best_runs[0].ppl : null,
+        traps_found: summary.failures.size,
+        architectures: Array.from(summary.architectures),
+        message: `Synthesis complete: ${files.length} sessions analyzed, ${summary.failures.size} traps documented, best PPL: ${summary.best_runs.length > 0 ? summary.best_runs[0].ppl.toFixed(4) : 'N/A'}`
+      });
+
+      return summary;
+    } catch (err) {
+      this.writeStatus({
+        status: 'error',
+        error: err.message,
+        failed_at: new Date().toISOString(),
+        message: `Historical scan failed: ${err.message}`
+      });
+      throw err;
+    }
   }
 
   saveHistoricalRecords(summary) {

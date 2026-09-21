@@ -21,6 +21,7 @@ Usage: anchor-lab-ai <command> [options]
 Commands:
   doctor              Run system, compute fleet & auth audit
   status              Show active 3D context, in-flight runs, and completed tests
+  check               Audit historical scan status, subagents & supervisor invariants
   context [m] [a] [e] View or set active (Model, Activity, Experiment)
   model [choice]      View or switch harvester model (e.g. openai/gpt-5.6-luna)
   start               Start background watcher in tmux session (anchor-lab-worker)
@@ -60,6 +61,13 @@ switch (command) {
     activeRuns.forEach(r => {
       console.log(`  • [${r.model}][${r.activity}/${r.experiment}] ${r.run_id} - Step ${r.progress.step}/${r.progress.total_steps} (${r.progress.status})`);
     });
+    break;
+  }
+
+  case 'check': {
+    const AnchorChecker = require('../server/anchor-checker');
+    const checker = new AnchorChecker();
+    console.log(checker.renderReport());
     break;
   }
 

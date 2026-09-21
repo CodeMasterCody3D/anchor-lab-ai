@@ -115,6 +115,7 @@ Runs inside a dedicated, self-healing `tmux` session (`anchor-lab-worker`) to wa
 | `/anchorsweep <query>` | Targeted search across past session transcripts (5-hour quota guarded) |
 | `/anchorgraph [query]` | Intelligent multi-type graph generator (Line, Bars, Grouped, Pareto, Donut, Radar) |
 | `/anchorgraphlive` | Toggle real-time live graph streaming for in-flight training (ON/OFF) |
+| `/anchorlabcheck` | Audit historical scan progress, spawned subagents & supervisor invariants |
 | `/researchpaper` | Synthesize an academic research paper in NeurIPS/ArXiv format |
 | `/anchorcouncil <topic>` | Convene multi-model advisory subagents (strictly zero code edits) |
 | `/anchorhelp` | Complete laboratory command directory & cheat sheet |
@@ -129,6 +130,9 @@ anchor-lab-ai doctor
 
 # Active context & in-flight runs
 anchor-lab-ai status
+
+# Audit historical scan, spawned subagents & supervisor invariants
+anchor-lab-ai check
 
 # Switch harvester worker model
 anchor-lab-ai model openai/gpt-5.6-luna
@@ -154,7 +158,7 @@ anchor-lab-ai council "Hadamard vs Random Orthogonal rotations"
 
 ---
 
-## 🔌 Universal MCP Server (14 Tools)
+## 🔌 Universal MCP Server (15 Tools)
 
 Anchor-Lab-Ai exposes a standard Model Context Protocol (MCP) server:
 
@@ -172,6 +176,7 @@ Anchor-Lab-Ai exposes a standard Model Context Protocol (MCP) server:
 12. `lab_reconcile_memory`: 3-way delta: recalled assumptions vs actual code vs ledger.
 13. `lab_deep_sweep`: Historical transcript search with 5-hour quota protection.
 14. `lab_get_morning_handoff`: 4-bullet morning resume card after late-night runs.
+15. `anchor_lab_check`: Audit historical scan progress, subagent tasks & supervisor invariants.
 
 ---
 
