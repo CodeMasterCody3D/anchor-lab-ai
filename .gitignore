@@ -1,0 +1,11 @@
+node_modules/
+*.log
+daemon.log
+events.jsonl
+config.json
+projects/
+reports/
+historical/
+.DS_Store
+*.tmp
+*.svg

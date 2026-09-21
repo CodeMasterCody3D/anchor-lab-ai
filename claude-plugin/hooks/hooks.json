@@ -1,0 +1,57 @@
+{
+  "description": "Anchor-Lab-Ai lifecycle hooks",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/cody/.local/bin/node /home/cody/.claude/skills/anchor-lab-ai/hooks/on-session-start.js"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/cody/.local/bin/node /home/cody/.claude/skills/anchor-lab-ai/hooks/on-prompt-submit.js"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/cody/.local/bin/node /home/cody/.claude/skills/anchor-lab-ai/hooks/on-pre-tool.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/cody/.local/bin/node /home/cody/.claude/skills/anchor-lab-ai/hooks/on-post-tool.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/cody/.local/bin/node /home/cody/.claude/skills/anchor-lab-ai/hooks/on-stop.js"
+          }
+        ]
+      }
+    ]
+  }
+}

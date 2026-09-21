@@ -1,0 +1,37 @@
+{
+  "name": "anchor-lab-ai",
+  "version": "1.0.0",
+  "description": "Autonomous AI Laboratory Manager, Universal MCP Server & Claude Code Plugin for Multi-System LLM Training, Quantization Labs, and Distributed Compute",
+  "main": "server/mcp-server.js",
+  "bin": {
+    "anchor-lab-ai": "./bin/anchor-lab-ai"
+  },
+  "scripts": {
+    "start": "node bin/anchor-lab-ai start",
+    "doctor": "node bin/anchor-lab-ai doctor",
+    "status": "node bin/anchor-lab-ai status",
+    "scan": "node bin/anchor-lab-ai scan",
+    "graph": "node bin/anchor-lab-ai graph"
+  },
+  "keywords": [
+    "ai-lab",
+    "mcp-server",
+    "claude-code-plugin",
+    "llm-training",
+    "quantization",
+    "distributed-compute",
+    "tmux",
+    "colab",
+    "kaggle"
+  ],
+  "author": "Cody Dixon <codydixon71@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CodeMasterCody3D/anchor-lab-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CodeMasterCody3D/anchor-lab-ai/issues"
+  },
+  "homepage": "https://github.com/CodeMasterCody3D/anchor-lab-ai#readme"
+}

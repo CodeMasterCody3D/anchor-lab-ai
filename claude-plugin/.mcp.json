@@ -1,0 +1,8 @@
+{
+  "anchor_lab_ai": {
+    "command": "/home/cody/.local/bin/node",
+    "args": [
+      "/home/cody/.anchor-lab-ai/server/mcp-server.js"
+    ]
+  }
+}

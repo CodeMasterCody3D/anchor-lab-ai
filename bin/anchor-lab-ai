@@ -1,0 +1,193 @@
+#!/usr/bin/env node
+const { execSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const { renderBanner, runAudit } = require('../server/audit-wizard');
+const ModelRouter = require('../server/model-router');
+const PartitionManager = require('../server/partition-manager');
+
+const modelRouter = new ModelRouter();
+const partitionMgr = new PartitionManager();
+
+const args = process.argv.slice(2);
+const command = args[0] || 'status';
+
+function showHelp() {
+  console.log(`
+Anchor-Lab-Ai CLI: Multi-System AI Laboratory Manager
+
+Usage: anchor-lab-ai <command> [options]
+
+Commands:
+  doctor              Run system, compute fleet & auth audit
+  status              Show active 3D context, in-flight runs, and completed tests
+  context [m] [a] [e] View or set active (Model, Activity, Experiment)
+  model [choice]      View or switch harvester model (e.g. openai/gpt-5.6-luna)
+  start               Start background watcher in tmux session (anchor-lab-worker)
+  attach              Attach to running anchor-lab-worker tmux session
+  stop                Stop background watcher tmux session
+  sweep <query>       Run transcript archeologist search across past sessions
+  scan                Run whole-project historical scan & build isolated dossier
+  graph [query]       Render intelligent charts (Line, Ranking Bars, Grouped, Pareto, Donut, Radar)
+  graphlive           Toggle live graph generation for in-flight training (ON/OFF)
+  paper               Generate formal academic research paper from project dossier
+  council <topic>     Convene multi-model advisory subagents (strictly zero code edits)
+  help                Show this message
+`.trim());
+}
+
+function ensureTmuxInstalled() {
+  try {
+    const p = execSync('which tmux 2>/dev/null', { encoding: 'utf8' }).trim();
+    if (p) return true;
+  } catch {}
+  console.error(`[ERROR]: tmux is not installed on this machine.`);
+  console.error(`tmux is required to host the background worker daemon.\nPlease install it via:\n  sudo apt install -y tmux\n`);
+  return false;
+}
+
+switch (command) {
+  case 'doctor': {
+    console.log(renderBanner());
+    break;
+  }
+
+  case 'status': {
+    console.log(`[ANCHOR-LAB-AI STATUS]`);
+    console.log(`Active Harvester Model: ${modelRouter.getModel()}`);
+    const activeRuns = partitionMgr.listActiveRuns();
+    console.log(`In-Flight Active Runs: ${activeRuns.length}`);
+    activeRuns.forEach(r => {
+      console.log(`  • [${r.model}][${r.activity}/${r.experiment}] ${r.run_id} - Step ${r.progress.step}/${r.progress.total_steps} (${r.progress.status})`);
+    });
+    break;
+  }
+
+  case 'model': {
+    const choice = args[1];
+    if (!choice) {
+      console.log(`Current model: ${modelRouter.getModel()}`);
+      console.log(`To switch, run: anchor-lab-ai model <choice>`);
+      console.log(`Examples:`);
+      console.log(`  anchor-lab-ai model openai/gpt-5.6-luna`);
+      console.log(`  anchor-lab-ai model openrouter/nvidia/nemotron-3.5-lightning:free`);
+      console.log(`  anchor-lab-ai model agy:gemini-3.8-flash-high`);
+      console.log(`  anchor-lab-ai model agy:gpt-oss-120b-medium`);
+    } else {
+      const res = modelRouter.setModel(choice);
+      if (res.success) {
+        console.log(`✔ Switched model to: ${choice}`);
+      } else {
+        console.log(`✖ Failed to set model: ${res.error}`);
+      }
+    }
+    break;
+  }
+
+  case 'start': {
+    if (!ensureTmuxInstalled()) break;
+    try {
+      execSync(`tmux has-session -t anchor-lab-worker 2>/dev/null`);
+      console.log(`anchor-lab-worker is already running in tmux! Use 'anchor-lab-ai attach' to view.`);
+    } catch {
+      const watcherPath = path.join(__dirname, '../daemon/watcher.js');
+      execSync(`tmux new-session -d -s anchor-lab-worker "node ${watcherPath}"`);
+      console.log(`✔ Started background daemon in tmux session 'anchor-lab-worker'.`);
+      console.log(`Run 'anchor-lab-ai attach' to view live logs.`);
+    }
+    break;
+  }
+
+  case 'attach': {
+    if (!ensureTmuxInstalled()) break;
+    try {
+      execSync(`tmux has-session -t anchor-lab-worker 2>/dev/null`);
+      console.log(`Attaching to anchor-lab-worker... (Press Ctrl+B then D to detach)`);
+      require('child_process').spawn('tmux', ['attach-session', '-t', 'anchor-lab-worker'], { stdio: 'inherit' });
+    } catch {
+      console.log(`No active session found. Start one with 'anchor-lab-ai start'.`);
+    }
+    break;
+  }
+
+  case 'stop': {
+    if (!ensureTmuxInstalled()) break;
+    try {
+      execSync(`tmux kill-session -t anchor-lab-worker 2>/dev/null`);
+      console.log(`✔ Terminated anchor-lab-worker tmux session.`);
+    } catch {
+      console.log(`No active session 'anchor-lab-worker' running.`);
+    }
+    break;
+  }
+
+  case 'sweep': {
+    const q = args.slice(1).join(' ');
+    if (!q) {
+      console.log(`Usage: anchor-lab-ai sweep <query>`);
+    } else {
+      const archPath = path.join(__dirname, '../server/archeologist.js');
+      try {
+        require('child_process').execSync(`node "${archPath}" "${q.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
+      } catch (e) {
+        console.error(`Sweep failed: ${e.message}`);
+      }
+    }
+    break;
+  }
+
+  case 'scan': {
+    const synthPath = path.join(__dirname, '../server/historical-synthesizer.js');
+    console.log(`[ANCHOR-LAB-AI]: Running full project historical scan...`);
+    require('child_process').execSync(`node "${synthPath}"`, { stdio: 'inherit' });
+    break;
+  }
+
+  case 'graph': {
+    const GraphEngine = require('../server/graph-engine');
+    const ge = new GraphEngine();
+    const query = args.slice(1).join(' ');
+    const res = ge.plotFromQuery(query);
+    if (res.status === 'catalog') {
+      console.log(res.catalog);
+    } else if (res.status === 'success') {
+      console.log(res.chart);
+      console.log(`✔ Vector plot saved to:\n  ${res.svgPath}`);
+    } else {
+      console.log(res.message);
+    }
+    break;
+  }
+
+  case 'graphlive': {
+    const GraphEngine = require('../server/graph-engine');
+    const ge = new GraphEngine();
+    const enabled = ge.toggleLiveGraph();
+    console.log(`[ANCHOR-LAB-AI LIVE GRAPH]: ${enabled ? '✔ ACTIVATED. Live graphs will stream for all training runs.' : '✖ DEACTIVATED. Live graph streaming turned off.'}`);
+    break;
+  }
+
+  case 'paper': {
+    const PaperGenerator = require('../server/paper-generator');
+    const pg = new PaperGenerator();
+    const paperPath = pg.generatePaper();
+    console.log(`✔ Academic research paper generated successfully at:\n  ${paperPath}`);
+    break;
+  }
+
+  case 'council': {
+    const ResearchCouncil = require('../server/research-council');
+    const topic = args.slice(1).join(' ') || 'Hadamard vs Random Orthogonal rotations for ternary quantization';
+    const council = new ResearchCouncil();
+    console.log(`[ANCHOR RESEARCH COUNCIL]: Convening advisory models on: "${topic}"...`);
+    council.deliberate(topic).then(res => {
+      console.log(`✔ Deliberation complete. Proposal saved to:\n  ${res.proposalPath}`);
+    });
+    break;
+  }
+
+  case 'help':
+  default:
+    showHelp();
+    break;
+}
