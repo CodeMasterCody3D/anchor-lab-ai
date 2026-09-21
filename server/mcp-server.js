@@ -7,7 +7,7 @@ const ColabController = require('./colab-controller');
 const KaggleController = require('./kaggle-controller');
 const SSHController = require('./ssh-controller');
 const ModelRouter = require('./model-router');
-const { runAudit, renderBanner } = require('./audit-wizard');
+const { runAudit, renderBanner, loadActiveContext } = require('./audit-wizard');
 const { searchTranscripts } = require('./archeologist');
 
 const BASE_DIR = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/projects/quantization-side-lab');
@@ -17,11 +17,9 @@ const kaggleCtrl = new KaggleController();
 const sshCtrl = new SSHController();
 const modelRouter = new ModelRouter();
 
-let activeContext = {
-  model: 'qwen2.5-0.5b',
-  activity: 'training',
-  experiment: 'recon-window'
-};
+// Load from active_context.json, do NOT hardcode: a fresh MCP process used to report the stale defaults
+// until someone called lab_set_context in THAT process (2026-09-21 fix).
+let activeContext = loadActiveContext();
 
 const TOOLS = [
   {

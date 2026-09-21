@@ -126,11 +126,30 @@ function runAudit() {
   };
 }
 
-function renderBanner(activeContext = {}) {
+// THE ONE SOURCE OF TRUTH for the 3D context. `lab_set_context` writes active_context.json; every reader
+// (CLI doctor/status, the session-start banner, the MCP server) must load it from here. Before 2026-09-21
+// renderBanner() ignored the file entirely and fell back to hardcoded defaults, so `doctor` printed
+// qwen2.5-0.5b/training/recon-window while the prompt digest -- which DOES read the file -- printed the real
+// context. Two readers, two answers, and the stale one looked authoritative.
+const ACTIVE_CONTEXT_FILE = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/active_context.json');
+const CONTEXT_DEFAULTS = { model: 'qwen2.5-0.5b', activity: 'training', experiment: 'recon-window' };
+
+function loadActiveContext() {
+  try {
+    if (fs.existsSync(ACTIVE_CONTEXT_FILE)) {
+      const ctx = JSON.parse(fs.readFileSync(ACTIVE_CONTEXT_FILE, 'utf8'));
+      if (ctx && ctx.model) return { ...CONTEXT_DEFAULTS, ...ctx };
+    }
+  } catch {}
+  return { ...CONTEXT_DEFAULTS };
+}
+
+function renderBanner(activeContext = null) {
   const audit = runAudit();
-  const model = activeContext.model || 'qwen2.5-0.5b';
-  const activity = activeContext.activity || 'training';
-  const experiment = activeContext.experiment || 'recon-window';
+  const ctx = (activeContext && activeContext.model) ? activeContext : loadActiveContext();
+  const model = ctx.model;
+  const activity = ctx.activity;
+  const experiment = ctx.experiment;
 
   const tmuxStatus = audit.tmux.installed
     ? `✔ tmux Daemon Host  : Installed (${audit.tmux.version}${audit.tmux.workerRunning ? ', session \'anchor-lab-worker\' RUNNING' : ', worker idle'})`
@@ -198,6 +217,8 @@ if (require.main === module) {
 module.exports = {
   runAudit,
   renderBanner,
+  loadActiveContext,
+  ACTIVE_CONTEXT_FILE,
   checkBinary,
   checkColabMCP,
   checkColabCLI,
