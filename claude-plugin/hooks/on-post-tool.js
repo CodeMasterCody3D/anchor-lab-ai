@@ -36,6 +36,8 @@ process.stdin.on('end', () => {
     const event = {
       type: 'POST_TOOL_USE',
       timestamp: new Date().toISOString(),
+      session_id: data.session_id || undefined,
+      cwd: data.cwd || undefined,
       tool: data.tool_name || data.tool || 'unknown',
       summary: summary.slice(0, 500),
       command: command ? command.slice(0, 500) : undefined,

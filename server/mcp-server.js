@@ -203,6 +203,27 @@ const TOOLS = [
       },
       required: ['slug']
     }
+  },
+  {
+    name: 'lab_catchup_chat',
+    description: 'Ingests today chat messages, analyzes agreed test findings between Cody and Claude, extracts active plans, and updates CONFIRMED_FINDINGS.md and ACTIVE_PLAN.md.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Optional target date YYYY-MM-DD (defaults to today)' },
+        cwd: { type: 'string', description: 'Optional project directory' }
+      }
+    }
+  },
+  {
+    name: 'lab_get_active_plan',
+    description: 'Retrieves the latest confirmed findings, active plan, and minimality guard status.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Optional project directory' }
+      }
+    }
   }
 ];
 
@@ -406,6 +427,39 @@ Recommendation: ${fitsHostLaptop ? 'Can run locally for micro-tests.' : 'Route t
         res += `• Live Progress: Step ${logs.latest_step.step}/${logs.latest_step.total_steps} (loss=${logs.latest_step.loss})\n`;
       }
       return { content: [{ type: 'text', text: res }] };
+    }
+
+    case 'lab_catchup_chat': {
+      const ChatIngester = require('./chat-ingester');
+      const ingester = new ChatIngester();
+      const res = ingester.ingestSession(args.cwd || process.cwd(), null, args.date || null);
+      let out = `✔ Chat Ingestion Complete for [${res.project}]\n`;
+      out += `• Session: ${res.session_id}\n`;
+      out += `• Turns Scanned: ${res.turns_scanned}\n`;
+      out += `• Confirmed Findings: ${res.findings_count} recorded in CONFIRMED_FINDINGS.md\n`;
+      if (res.latest_finding) {
+        out += `\nLatest Confirmed Finding:\n${res.latest_finding.text}\n`;
+      }
+      out += `\nActive Plan:\n${res.latest_plan}\n`;
+      return { content: [{ type: 'text', text: out }] };
+    }
+
+    case 'lab_get_active_plan': {
+      const { getProjectBaseDir } = require('./project-resolver');
+      const projDir = getProjectBaseDir(args.cwd);
+      const planFile = path.join(projDir, 'ACTIVE_PLAN.md');
+      const findingsFile = path.join(projDir, 'CONFIRMED_FINDINGS.md');
+      let out = '';
+      if (fs.existsSync(planFile)) {
+        out += fs.readFileSync(planFile, 'utf8') + '\n\n';
+      }
+      if (fs.existsSync(findingsFile)) {
+        out += fs.readFileSync(findingsFile, 'utf8');
+      }
+      if (!out) {
+        out = 'No active plan recorded yet. Run lab_catchup_chat to ingest.';
+      }
+      return { content: [{ type: 'text', text: out }] };
     }
 
     case 'lab_remote_colab_dispatch': {

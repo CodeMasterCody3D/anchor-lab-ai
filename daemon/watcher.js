@@ -6,6 +6,7 @@ const ColabController = require('../server/colab-controller');
 const KaggleController = require('../server/kaggle-controller');
 const SSHController = require('../server/ssh-controller');
 const ModelRouter = require('../server/model-router');
+const ChatIngester = require('../server/chat-ingester');
 const { getProjectBaseDir } = require('../server/project-resolver');
 const { loadActiveContext } = require('../server/audit-wizard');
 
@@ -19,6 +20,7 @@ const colabCtrl = new ColabController();
 const kaggleCtrl = new KaggleController();
 const sshCtrl = new SSHController();
 const modelRouter = new ModelRouter();
+const chatIngester = new ChatIngester();
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -145,6 +147,16 @@ function processEventQueue() {
         log(`Event: ${event.type} [${event.tool || 'hook'}] ${detail}`.trim());
       } catch {}
     }
+
+    // 4. Ingest latest chat notes when new events land
+    try {
+      const res = chatIngester.ingestSession();
+      if (res && res.findings_count > 0) {
+        log(`Chat Ingester: Synced ${res.findings_count} confirmed findings & active plan for ${res.project}.`);
+      }
+    } catch (ingestErr) {
+      log(`Chat Ingester warning: ${ingestErr.message}`);
+    }
   } catch (e) {
     log(`Error reading event queue: ${e.message}`);
   }
@@ -162,4 +174,8 @@ setInterval(async () => {
 
 // Run first check immediately
 processEventQueue();
+try {
+  const initRes = chatIngester.ingestSession();
+  log(`Initial chat ingestion: ${initRes.findings_count} findings cataloged in CONFIRMED_FINDINGS.md`);
+} catch (_) {}
 pollActiveRuns();

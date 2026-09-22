@@ -32,6 +32,7 @@ Commands:
   graph [query]       Render intelligent charts (Line, Ranking Bars, Grouped, Pareto, Donut, Radar)
   graphlive           Toggle live graph generation for in-flight training (ON/OFF)
   paper               Generate formal academic research paper from project dossier
+  catchup [date]      Ingest today's chat, extract agreed findings & update active plan
   council <topic>     Convene multi-model advisory subagents (strictly zero code edits)
   help                Show this message
 `.trim());
@@ -226,6 +227,26 @@ switch (command) {
     council.deliberate(topic).then(res => {
       console.log(`✔ Deliberation complete. Proposal saved to:\n  ${res.proposalPath}`);
     });
+    break;
+  }
+
+  case 'catchup':
+  case 'ingest': {
+    const ChatIngester = require('../server/chat-ingester');
+    const ingester = new ChatIngester();
+    const targetDate = args[1] || null;
+    const res = ingester.ingestSession(process.cwd(), null, targetDate);
+    console.log(`\n\x1b[1m\x1b[32m✔ Anchor Chat Ingestion Complete for [${res.project}]\x1b[0m`);
+    console.log(`  • Session ID:         ${res.session_id}`);
+    console.log(`  • Turns Scanned:      ${res.turns_scanned}`);
+    console.log(`  • Confirmed Findings: ${res.findings_count} recorded in CONFIRMED_FINDINGS.md`);
+    if (res.latest_finding) {
+      console.log(`\n\x1b[1mLatest Confirmed Finding:\x1b[0m\n  ${res.latest_finding.text.split('\n')[0]}`);
+    }
+    console.log(`\n\x1b[1mActive Plan:\x1b[0m\n  ${res.latest_plan.split('\n')[0]}\n`);
+    console.log(`  Artifacts:`);
+    console.log(`  - ${res.findingsFile}`);
+    console.log(`  - ${res.planFile}\n`);
     break;
   }
 

@@ -49,7 +49,25 @@ function getProjectBaseDir(projectName) {
   return baseDir;
 }
 
+/**
+ * Get the actual project workspace directory (e.g. /home/cody/onebit-forge)
+ * @param {string} [projectName]
+ * @param {string} [explicitCwd]
+ * @returns {string} Absolute path to workspace directory
+ */
+function getWorkspaceDir(projectName, explicitCwd) {
+  if (explicitCwd && !explicitCwd.includes('.anchor-lab-ai')) {
+    return path.resolve(explicitCwd);
+  }
+  const proj = projectName || resolveActiveProject(explicitCwd);
+  const home = process.env.HOME || '/home/cody';
+  const candidate = path.join(home, proj);
+  if (fs.existsSync(candidate)) return candidate;
+  return process.cwd();
+}
+
 module.exports = {
   resolveActiveProject,
-  getProjectBaseDir
+  getProjectBaseDir,
+  getWorkspaceDir
 };
