@@ -20,7 +20,13 @@ function formatMessagesToPrompt(messages) {
   }
   
   if (messages.length === 1) {
-    return messages[0].content || '';
+    let content = messages[0].content || '';
+    if (content.length > 75000) {
+      const head = content.slice(0, 15000);
+      const tail = content.slice(-55000);
+      content = `${head}\n\n[... earlier conversation truncated for observation efficiency ...]\n\n${tail}`;
+    }
+    return content;
   }
 
   const parts = [];
@@ -37,7 +43,13 @@ function formatMessagesToPrompt(messages) {
       parts.push(`[${role}]:\n${content}`);
     }
   }
-  return parts.join('\n\n');
+  let fullPrompt = parts.join('\n\n');
+  if (fullPrompt.length > 75000) {
+    const head = fullPrompt.slice(0, 15000);
+    const tail = fullPrompt.slice(-55000);
+    fullPrompt = `${head}\n\n[... earlier conversation truncated for observation efficiency ...]\n\n${tail}`;
+  }
+  return fullPrompt;
 }
 
 const server = http.createServer((req, res) => {
