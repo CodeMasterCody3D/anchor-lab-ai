@@ -21,6 +21,7 @@ const kaggleCtrl = new KaggleController();
 const sshCtrl = new SSHController();
 const modelRouter = new ModelRouter();
 const chatIngester = new ChatIngester();
+const { startServer } = require('../server/openai-proxy');
 
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -31,6 +32,7 @@ function log(msg) {
 }
 
 log(`Anchor-Lab-Ai Watcher Daemon started. Active Model Engine: ${modelRouter.getModel()} | Project: ${path.basename(BASE_DIR)}`);
+startServer();
 
 async function pollActiveRuns() {
   const currentCtx = loadActiveContext();
