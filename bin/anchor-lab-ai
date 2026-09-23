@@ -134,8 +134,10 @@ switch (command) {
       console.log(`anchor-lab-worker is already running in tmux! Use 'anchor-lab-ai attach' to view.`);
     } catch {
       const watcherPath = path.join(__dirname, '../daemon/watcher.js');
+      const proxyPath = path.join(__dirname, '../server/openai-proxy.js');
       execSync(`tmux new-session -d -s anchor-lab-worker "node ${watcherPath}"`);
-      console.log(`✔ Started background daemon in tmux session 'anchor-lab-worker'.`);
+      execSync(`tmux new-window -t anchor-lab-worker -n "openai-proxy" "node ${proxyPath}"`);
+      console.log(`✔ Started background daemon & OpenAI proxy in tmux session 'anchor-lab-worker'.`);
       console.log(`Run 'anchor-lab-ai attach' to view live logs.`);
     }
     break;
