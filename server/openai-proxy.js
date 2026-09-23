@@ -7,6 +7,13 @@ const HOST = '127.0.0.1';
 
 const modelRouter = new ModelRouter();
 
+let pendingQueue = Promise.resolve();
+function enqueueInference(fn) {
+  const next = pendingQueue.then(fn, fn);
+  pendingQueue = next.catch(() => {});
+  return next;
+}
+
 function formatMessagesToPrompt(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return '';
@@ -90,9 +97,9 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        // Query model-router asynchronously (invokes opencode --pure with Cody's OpenAI auth login)
+        // Query model-router asynchronously through the serialized queue
         const startTime = Date.now();
-        const result = await modelRouter.queryAsync(promptText, targetModel, { timeoutMs: 300000 });
+        const result = await enqueueInference(() => modelRouter.queryAsync(promptText, targetModel, { timeoutMs: 300000 }));
 
         if (!result.success) {
           console.error(`[ANCHOR OPENAI PROXY] Error from OpenCode: ${result.error}`);

@@ -87,8 +87,9 @@ class ModelRouter {
 
     // Route 2: OpenCode (OpenAI, OpenRouter :free, or OpenCode models)
     try {
-      // Use direct argument spawning with --pure and neutral cwd to avoid running external plugins or workspace tools
-      const res = spawnSync('opencode', ['run', '--pure', prompt, '-m', targetModel], {
+      // Pass prompt via stdin pipe to avoid Linux ARG_MAX limits on large prompts
+      const res = spawnSync('opencode', ['run', '--pure', '-m', targetModel], {
+        input: prompt,
         encoding: 'utf8',
         timeout: timeoutMs,
         maxBuffer: 50 * 1024 * 1024,
@@ -121,10 +122,15 @@ class ModelRouter {
       let stderr = '';
       let killed = false;
 
-      const child = spawn('opencode', ['run', '--pure', prompt, '-m', targetModel], {
+      const child = spawn('opencode', ['run', '--pure', '-m', targetModel], {
         cwd: os.tmpdir(),
-        env: process.env
+        env: process.env,
+        stdio: ['pipe', 'pipe', 'pipe']
       });
+
+      // Write prompt via stdin to avoid Linux ARG_MAX argument size limits on huge prompts
+      child.stdin.write(prompt);
+      child.stdin.end();
 
       const timer = setTimeout(() => {
         killed = true;
