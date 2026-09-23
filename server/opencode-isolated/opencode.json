@@ -1,1 +1,16 @@
-{"$schema":"https://opencode.ai/config.json","instructions":[],"mcp":{}}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [],
+  "permission": {
+    "*": "deny"
+  },
+  "mcp": {
+    "claude_memory": { "enabled": false },
+    "zai-mcp-server": { "enabled": false },
+    "web-search-prime": { "enabled": false },
+    "web-reader": { "enabled": false },
+    "zread": { "enabled": false },
+    "anchor_lab_ai": { "enabled": false },
+    "colab_mcp": { "enabled": false }
+  }
+}
