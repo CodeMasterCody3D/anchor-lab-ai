@@ -5,7 +5,7 @@ const path = require('path');
 const os = require('os');
 
 const CONFIG_PATH = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/config.json');
-const PURE_CONFIG_PATH = path.join(__dirname, 'opencode-pure.json');
+const PURE_CONFIG_DIR = path.join(__dirname, 'opencode-isolated');
 
 // Cody's `agy-auto` is a bash ALIAS (.bashrc:139 -- `agy --mode=accept-edits --dangerously-skip-permissions`),
 // and spawnSync runs a binary directly with no shell, so the alias is invisible here. Pass the flag instead.
@@ -95,7 +95,7 @@ class ModelRouter {
         timeout: timeoutMs,
         maxBuffer: 50 * 1024 * 1024,
         cwd: os.tmpdir(),
-        env: { ...process.env, OPENCODE_CONFIG: PURE_CONFIG_PATH }
+        env: { ...process.env, OPENCODE_CONFIG_DIR: PURE_CONFIG_DIR }
       });
 
       if (res.status !== 0) {
@@ -126,7 +126,7 @@ class ModelRouter {
 
       const child = spawn('opencode', ['run', '--pure', '-m', targetModel], {
         cwd: os.tmpdir(),
-        env: { ...process.env, OPENCODE_CONFIG: PURE_CONFIG_PATH },
+        env: { ...process.env, OPENCODE_CONFIG_DIR: PURE_CONFIG_DIR },
         stdio: ['pipe', 'pipe', 'pipe']
       });
 
