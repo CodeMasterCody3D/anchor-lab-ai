@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-const { execSync, spawnSync } = require('child_process');
+const { execSync, spawnSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const CONFIG_PATH = path.join(process.env.HOME || '/home/cody', '.anchor-lab-ai/config.json');
 
@@ -86,11 +87,12 @@ class ModelRouter {
 
     // Route 2: OpenCode (OpenAI, OpenRouter :free, or OpenCode models)
     try {
-      // Use direct argument spawning to eliminate shell-escaping bugs
-      const res = spawnSync('opencode', ['run', prompt, '-m', targetModel], {
+      // Use direct argument spawning with --pure and neutral cwd to avoid running external plugins or workspace tools
+      const res = spawnSync('opencode', ['run', '--pure', prompt, '-m', targetModel], {
         encoding: 'utf8',
         timeout: timeoutMs,
-        maxBuffer: 50 * 1024 * 1024
+        maxBuffer: 50 * 1024 * 1024,
+        cwd: os.tmpdir()
       });
 
       if (res.status !== 0) {
@@ -104,6 +106,58 @@ class ModelRouter {
     } catch (e) {
       return { success: false, error: e.message, model: targetModel };
     }
+  }
+
+  async queryAsync(prompt, overrideModel = null, options = {}) {
+    const targetModel = overrideModel || this.currentModel;
+    const timeoutMs = options.timeoutMs || 900000;
+
+    if (targetModel.startsWith('agy:') || targetModel.startsWith('agy/')) {
+      return this.query(prompt, overrideModel, options);
+    }
+
+    return new Promise((resolve) => {
+      let stdout = '';
+      let stderr = '';
+      let killed = false;
+
+      const child = spawn('opencode', ['run', '--pure', prompt, '-m', targetModel], {
+        cwd: os.tmpdir(),
+        env: process.env
+      });
+
+      const timer = setTimeout(() => {
+        killed = true;
+        child.kill('SIGTERM');
+        resolve({ success: false, error: `Timed out after ${timeoutMs}ms`, model: targetModel });
+      }, timeoutMs);
+
+      child.stdout.on('data', (data) => {
+        stdout += data.toString('utf8');
+      });
+
+      child.stderr.on('data', (data) => {
+        stderr += data.toString('utf8');
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timer);
+        if (!killed) {
+          resolve({ success: false, error: err.message, model: targetModel });
+        }
+      });
+
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (killed) return;
+        if (code !== 0) {
+          resolve({ success: false, error: (stderr || `Process exited with code ${code}`).trim(), model: targetModel });
+        } else {
+          const cleaned = stdout.replace(/^>.*$/gm, '').trim();
+          resolve({ success: true, model: targetModel, response: cleaned });
+        }
+      });
+    });
   }
 }
 

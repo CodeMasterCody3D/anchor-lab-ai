@@ -77,7 +77,7 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && (url === '/v1/chat/completions' || url === '/chat/completions')) {
     let body = '';
     req.on('data', chunk => { body += chunk; });
-    req.on('end', () => {
+    req.on('end', async () => {
       try {
         const payload = JSON.parse(body || '{}');
         const targetModel = payload.model || modelRouter.getModel() || 'openai/gpt-5.6-luna';
@@ -90,9 +90,9 @@ const server = http.createServer((req, res) => {
           return;
         }
 
-        // Query model-router (which invokes opencode with Cody's OpenAI auth login)
+        // Query model-router asynchronously (invokes opencode --pure with Cody's OpenAI auth login)
         const startTime = Date.now();
-        const result = modelRouter.query(promptText, targetModel, { timeoutMs: 120000 });
+        const result = await modelRouter.queryAsync(promptText, targetModel, { timeoutMs: 300000 });
 
         if (!result.success) {
           console.error(`[ANCHOR OPENAI PROXY] Error from OpenCode: ${result.error}`);
