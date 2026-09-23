@@ -8,7 +8,7 @@ const KaggleController = require('./kaggle-controller');
 const SSHController = require('./ssh-controller');
 const ModelRouter = require('./model-router');
 const { runAudit, renderBanner, loadActiveContext, ACTIVE_CONTEXT_FILE } = require('./audit-wizard');
-const { searchTranscripts } = require('./archeologist');
+const { searchTranscripts, searchArchaeology } = require('./archeologist');
 const { getProjectBaseDir } = require('./project-resolver');
 
 const BASE_DIR = getProjectBaseDir();
@@ -544,17 +544,89 @@ Rules:
     }
 
     case 'lab_reconcile_memory': {
-      const diff = `
-[MEMORY RECONCILIATION: "${args.topic}"]
+      const topic = args.topic || 'General Memory';
+      const rememberedState = args.remembered_state || '';
+      const codePath = args.current_code_path;
+
+      // 1. Read the current code file
+      let codeExcerpt = '(Code file not found)';
+      let targetFile = codePath;
+      if (targetFile) {
+        if (!fs.existsSync(targetFile)) {
+          const alt1 = path.join(BASE_DIR, targetFile);
+          const alt2 = path.join('/home/cody/onebit-forge', path.basename(targetFile));
+          if (fs.existsSync(alt1)) targetFile = alt1;
+          else if (fs.existsSync(alt2)) targetFile = alt2;
+        }
+        if (fs.existsSync(targetFile)) {
+          try {
+            const raw = fs.readFileSync(targetFile, 'utf8');
+            const lines = raw.split('\n');
+            codeExcerpt = lines.slice(0, 100).join('\n');
+            if (lines.length > 100) codeExcerpt += `\n... [${lines.length - 100} more lines truncated]`;
+          } catch (e) {
+            codeExcerpt = `(Error reading file: ${e.message})`;
+          }
+        }
+      }
+
+      // 2. Search Archaeology for Topic and Remembered State
+      const archQuery = `${topic} ${rememberedState}`;
+      const searchRes = await searchArchaeology(archQuery, { limit: 5 });
+
+      // 3. Ask Luna to synthesize a genuine 3-way delta
+      let reconciliationText = '';
+      try {
+        const prompt = `You are Anchor AI Laboratory Reconciler. Cody and Claude are reconciling a remembered past finding/state against the current codebase and historical lab records.
+Topic: "${topic}"
+
+What Cody Remembered:
+"${rememberedState}"
+
+Current Code (${path.basename(targetFile || 'unknown')}):
+${codeExcerpt}
+
+Historical Lab Evidence Recovered:
+${searchRes.formattedReport.slice(0, 4000)}
+
+Please generate a genuine, data-backed 3-way reconciliation diff formatted EXACTLY as follows:
+[MEMORY RECONCILIATION: "${topic}"]
 1. What You Remembered:
-   "${args.remembered_state}"
-2. Current Implementation in Codebase (${path.basename(args.current_code_path)}):
-   - Code reflects recent optimization updates.
-3. Why It Changed:
-   - Updated to adhere to strict zero-float integer anchors and eliminate float drift.
+   (Summarize what Cody recalled with specific numbers/claims)
+2. Current Implementation in Codebase (${path.basename(targetFile || 'code')}):
+   (Analyze what the current code at this path actually does, referencing functions, arguments, or design)
+3. Why It Changed & Historical Evidence:
+   (Explain the history based on the recovered evidence: which test was run, when, what the exact measurements/metrics were, why near-ties/differences occurred, and why the current code evolved as it did)
+Does that sound familiar?`;
+
+        const modelRes = await modelRouter.queryAsync(prompt, 'openai/gpt-5.6-luna', { timeoutMs: 35000 });
+        if (modelRes && modelRes.success && modelRes.response) {
+          reconciliationText = modelRes.response;
+        }
+      } catch (err) {}
+
+      // If Luna failed or timed out, provide rich deterministic synthesis grounded in real findings (NEVER CANNED DUMMY TEXT!)
+      if (!reconciliationText) {
+        let bestMemory = (searchRes.memoryDocs && searchRes.memoryDocs[0]) ? searchRes.memoryDocs[0] : null;
+        let memorySummary = bestMemory
+          ? `• Artifact: ${bestMemory.file} (${bestMemory.project})\n  ${bestMemory.description || bestMemory.excerpt}`
+          : 'Historical memory records confirm test runs in the project archive.';
+
+        reconciliationText = `
+[MEMORY RECONCILIATION: "${topic}"]
+1. What You Remembered:
+   "${rememberedState}"
+2. Current Implementation in Codebase (${path.basename(targetFile || 'unknown')}):
+   - File: ${targetFile}
+   - Excerpt:
+${codeExcerpt.split('\n').slice(0, 15).map(l => '     ' + l).join('\n')}
+3. Why It Changed & Historical Evidence:
+   ${memorySummary}
 Does that sound familiar?
 `.trim();
-      return { content: [{ type: 'text', text: diff }] };
+      }
+
+      return { content: [{ type: 'text', text: reconciliationText }] };
     }
 
     case 'lab_deep_sweep': {
@@ -562,24 +634,73 @@ Does that sound familiar?
       if (!args.use_free_model) {
         warning = `⚠️ [RATE LIMIT WARNING]: Running full transcript archeology directly with Claude can consume significant 5-hour quota.\nTip: Delegate to free OpenCode models (Nemotron-3.5, Gemma-4) or Luna.\n\n`;
       }
-      const searchRes = await searchTranscripts(args.query);
-      let out = `${warning}[HISTORICAL TRANSCRIPT ARCHAEOLOGY: "${args.query}"]\n`;
-      out += `Total Matching Moments Found: ${searchRes.totalFound}\n\n`;
-      searchRes.results.slice(0, 5).forEach((r, idx) => {
-        out += `--- Match ${idx + 1}: ${r.project} (${r.session}, line ${r.line}) ---\n`;
-        out += `${r.snippet.replace(/\\s+/g, ' ')}\n\n`;
-      });
+      const searchRes = await searchArchaeology(args.query, { limit: 8 });
+      let out = `${warning}${searchRes.formattedReport}`;
+
+      // If use_free_model is true, run Luna archaeological synthesis
+      if (args.use_free_model) {
+        try {
+          const synthesisPrompt = `You are Anchor AI Laboratory Archeologist. Provide an executive summary of historical lab evidence for Cody and Claude.\nUser Query: ${args.query}\nEvidence Recovered:\n${searchRes.formattedReport.slice(0, 4000)}\n\nProvide a concise 3-4 bullet executive summary identifying: (1) what test or code was recovered, (2) the exact dates and numbers/metrics, (3) the key conclusion.`;
+          const synth = await modelRouter.queryAsync(synthesisPrompt, 'openai/gpt-5.6-luna', { timeoutMs: 30000 });
+          if (synth && synth.success && synth.response) {
+            out = `${warning}🔬 [LUNA ARCHAEOLOGICAL SYNTHESIS]:\n${synth.response}\n\n` + out;
+          }
+        } catch {}
+      }
+
       return { content: [{ type: 'text', text: out }] };
     }
 
     case 'lab_get_morning_handoff': {
       const currentCtx = getActiveContext();
+      const m = currentCtx.model;
+      const a = currentCtx.activity;
+      const e = currentCtx.experiment;
+
+      // 1. In-flight and active runs
+      const activeRuns = partitionMgr.listActiveRuns();
+      const activeKaggle = kaggleCtrl.getActiveKernels(3);
+      let overnightStatus = `${activeRuns.length} active local run(s), ${activeKaggle.length} active remote kernel(s).`;
+      if (activeRuns.length === 0 && activeKaggle.length === 0) {
+        overnightStatus = '0 in-flight background runs; compute rigs healthy and idle.';
+      }
+
+      // 2. Latest baseline / metrics from ledger or project findings
+      const ledger = partitionMgr.getExperimentLedger(m, a, e);
+      let lastBaseline = 'No completed runs recorded yet in current partition.';
+      if (ledger.length > 0) {
+        const latest = ledger[ledger.length - 1];
+        lastBaseline = `Run ${latest.run_id} (${latest.completed_at ? latest.completed_at.slice(0, 16) : 'done'}): ${JSON.stringify(latest.final_metrics)}`;
+      } else {
+        const projDir = getProjectBaseDir();
+        const findingsFile = path.join(projDir, 'CONFIRMED_FINDINGS.md');
+        if (fs.existsSync(findingsFile)) {
+          try {
+            const raw = fs.readFileSync(findingsFile, 'utf8');
+            const match = raw.split('\n').find(l => l.includes('PPL') || l.includes('agreement') || l.includes('loss'));
+            if (match) lastBaseline = match.replace(/^[-*#\s]+/, '').trim().slice(0, 120);
+          } catch {}
+        }
+      }
+
+      // 3. Active Next Action
+      const projDir = getProjectBaseDir();
+      const planFile = path.join(projDir, 'ACTIVE_PLAN.md');
+      let nextAction = 'Ready to launch next partition experiment or evaluation.';
+      if (fs.existsSync(planFile)) {
+        try {
+          const raw = fs.readFileSync(planFile, 'utf8');
+          const lines = raw.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+          if (lines.length > 0) nextAction = lines[0].replace(/^[-*0-9.]+\s*/, '').trim().slice(0, 150);
+        } catch {}
+      }
+
       const handoff = `
 [MORNING HANDOFF CARD]
-• Overnight Status: 0 failed runs, all remote units healthy.
-• Active Focus: [${currentCtx.model}] ${currentCtx.activity}/${currentCtx.experiment}
-• Last Baseline: 8-bit PPL 9.94754 / 1-bit PPL 11.58607
-• Next Action: Ready to evaluate next quantization checkpoint on Colab or SSH rig.
+• Overnight Status: ${overnightStatus}
+• Active Focus: [${m}] ${a}/${e}
+• Last Baseline / Metrics: ${lastBaseline}
+• Next Action: ${nextAction}
 `.trim();
       return { content: [{ type: 'text', text: handoff }] };
     }
